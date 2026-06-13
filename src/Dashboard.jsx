@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { CardBody, InlineCardCreator, getCompatibleFormats } from './Cards.jsx';
 
-const FMT_ICONS = { chart:'bar_chart', stat:'speed', article:'article', table:'table_chart', map:'map', interactive:'touch_app', feed:'rss_feed', media:'image' };
+const FMT_ICONS = { chart:'bar_chart', stat:'speed', article:'article', table:'table_chart', map:'map', interactive:'touch_app', feed:'rss_feed', media:'image', custom:'code_blocks' };
 
 /* ─── PROMPT CONSOLE ─── */
 function PromptConsole({ consolePrompt, setConsolePrompt, onAddCard, isSubmitting, workflowConfig, samplePrompts }) {

@@ -1,9 +1,72 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
+
+/* ─── AUTO-ADOPTION: picks best card type when data shape mismatches ─── */
+function resolveCardType(stated, data, renderCode) {
+  if (stated === 'custom' || renderCode) return 'custom';
+  if (!data) return stated;
+
+  // Check if stated type can meaningfully render this data
+  const fits = (type) => {
+    switch (type) {
+      case 'chart':
+        return Array.isArray(data) && data.length > 0 &&
+          Object.values(data[0]).some(v => typeof v === 'number' || (!isNaN(parseFloat(v)) && String(v).trim() !== ''));
+      case 'stat':
+        return data.value !== undefined || data.metric !== undefined ||
+          (Array.isArray(data) && data.length > 0) ||
+          (data.rows && data.rows.length > 0);
+      case 'table':
+        return (data.headers && Array.isArray(data.rows)) ||
+          (Array.isArray(data) && data.length > 0 && typeof data[0] === 'object') ||
+          (data.items && Array.isArray(data.items));
+      case 'map':
+        return !!(data.markers && Array.isArray(data.markers) && data.markers.length > 0);
+      case 'interactive':
+        return !!(data.widgetType);
+      case 'media':
+        return !!(data.url || data.imageUrl);
+      case 'feed': {
+        const list = Array.isArray(data) ? data : (data.items || data.results || null);
+        return !!(list && list.length > 0 && (list[0].title || list[0].text || list[0].headline || list[0].url || list[0].name));
+      }
+      case 'article':
+        return !!(data.headline || data.body || typeof data === 'string');
+      default:
+        return false;
+    }
+  };
+
+  if (fits(stated)) return stated;
+
+  // stated type won't render well — find best match
+  if (data.markers) return 'map';
+  if (data.widgetType) return 'interactive';
+  if (data.url || data.imageUrl) return 'media';
+  if (data.value !== undefined || data.metric !== undefined) return 'stat';
+  if (data.headers && data.rows) return 'table';
+  if (data.headline || data.body) return 'article';
+
+  const list = Array.isArray(data) ? data : (data.items || data.results || null);
+  if (list && list.length > 0) {
+    const first = list[0];
+    if (first.title || first.text || first.headline || first.url) return 'feed';
+    if (typeof first === 'object' && Object.values(first).some(v => typeof v === 'number')) return 'chart';
+    return 'table';
+  }
+
+  return 'article';
+}
 
 export function getCompatibleFormats(card) {
   const { data } = card;
-  if (!data) return ['article'];
-  const fmts = new Set(['article', 'table']);
+  const fmts = new Set();
+  if (card.renderCode) fmts.add('custom');
+  if (!data) {
+    fmts.add('article');
+    if (card.cardType) fmts.add(card.cardType);
+    return Array.from(fmts);
+  }
+  fmts.add('article'); fmts.add('table');
   const list = Array.isArray(data) ? data : (data.items || data.rows || data.results || null);
   if (Array.isArray(data) || list) {
     fmts.add('feed');
@@ -147,7 +210,7 @@ export function CountdownTimer({ targetDate, color }) {
 
 export function InlineCardCreator({ card, onGenerate, onCancel }) {
   const [val, setVal] = useState('');
-  const suggestions = ['Bitcoin price weekly chart', 'London current temperature', 'Top tech news feed', 'Interactive todo checklist', 'Miles to km converter', 'Portfolio crypto allocation'];
+  const suggestions = ['Bitcoin price weekly chart', 'London current temperature', 'Top tech news feed', 'Interactive todo checklist', 'Miles to km converter', 'Portfolio crypto allocation', 'Word cloud of AI topics', 'Heatmap of server latency'];
   const submit = e => { e.preventDefault(); if (val.trim()) onGenerate(card.id, val.trim()); };
   return (
     <div className="inline-creator">
@@ -160,7 +223,7 @@ export function InlineCardCreator({ card, onGenerate, onCancel }) {
           value={val}
           onChange={e => setVal(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(e); } if (e.key === 'Escape') onCancel(card.id); }}
-          placeholder="e.g. BTC weekly chart, weather in London, countdown timer..."
+          placeholder="e.g. BTC weekly chart, weather in London, countdown timer, word cloud of topics..."
           autoFocus
         />
         <div className="inline-btns">
@@ -178,6 +241,40 @@ export function InlineCardCreator({ card, onGenerate, onCancel }) {
       </div>
     </div>
   );
+}
+
+/* ─── CUSTOM CARD RENDERER (LLM-written code) ─── */
+function CustomCardRenderer({ card }) {
+  const { data, renderSpec, renderCode } = card;
+  if (!renderCode) {
+    return (
+      <div className="card-error">
+        <span className="material-symbols-outlined">code_off</span>
+        <div className="err-title">No render code</div>
+        <div className="err-desc">The LLM did not provide custom rendering code for this card.</div>
+      </div>
+    );
+  }
+  try {
+    // renderCode is the body of: (React, data, renderSpec) => ReactElement
+    // LLM must use React.createElement() — no JSX syntax
+    // eslint-disable-next-line no-new-func
+    const fn = new Function('React', 'data', 'renderSpec', renderCode);
+    const element = fn(React, data, renderSpec);
+    return <div style={{ height:'100%', overflow:'auto', display:'flex', flexDirection:'column' }}>{element}</div>;
+  } catch (err) {
+    return (
+      <div className="card-error">
+        <span className="material-symbols-outlined">warning</span>
+        <div className="err-title">Custom Render Error</div>
+        <div className="err-desc">{err.message}</div>
+        <details style={{ fontSize:9, color:'var(--fg-dim)', marginTop:4 }}>
+          <summary style={{ cursor:'pointer' }}>View code</summary>
+          <pre style={{ marginTop:4, whiteSpace:'pre-wrap', wordBreak:'break-all', maxHeight:80, overflow:'auto' }}>{renderCode}</pre>
+        </details>
+      </div>
+    );
+  }
 }
 
 export function CardBody({ card, handlers }) {
@@ -205,11 +302,22 @@ export function CardBody({ card, handlers }) {
       </div>
     );
   }
-  const { cardType, data, renderSpec } = card;
+
+  const { data, renderSpec } = card;
+  // Auto-adopt best card type based on actual data shape
+  const cardType = resolveCardType(card.cardType, data, card.renderCode);
+
+  // Show adoption notice when type was overridden
+  const wasAdopted = cardType !== card.cardType && card.cardType !== 'custom';
+
   switch (cardType) {
+    case 'custom':
+      return <CustomCardRenderer card={card} />;
+
     case 'chart':
       return (
         <div style={{ display:'flex', flexDirection:'column', height:'100%', gap:0 }}>
+          {wasAdopted && <div className="type-adopted-badge">auto-adopted: {cardType}</div>}
           <SVGChart card={card} />
           {renderSpec?.summary && <p className="chart-summary">💡 {renderSpec.summary}</p>}
         </div>
@@ -231,6 +339,7 @@ export function CardBody({ card, handlers }) {
       const ico = dir==='up' ? 'trending_up' : dir==='down' ? 'trending_down' : 'trending_flat';
       return (
         <div className="stat-body">
+          {wasAdopted && <div className="type-adopted-badge">auto-adopted: {cardType}</div>}
           <div className="stat-val" style={{ color: renderSpec?.color || 'var(--fg)' }}>{statVal || '—'}</div>
           <div className={`stat-trend ${dir}`}><span className="material-symbols-outlined">{ico}</span>{statTrend || '—'}</div>
           <div className="stat-spark"><svg viewBox="0 0 100 20" width="100%" height="100%"><polyline fill="none" stroke={renderSpec?.color||'var(--success)'} strokeWidth="1.5" points="0,16 15,12 30,14 45,8 60,11 75,5 90,7 100,3" /></svg></div>
@@ -241,7 +350,13 @@ export function CardBody({ card, handlers }) {
       const headline = data?.headline || card.title;
       let body = data?.body || renderSpec?.summary || '';
       if (!body) { if (Array.isArray(data)) body=`Dataset: ${data.length} entries.`; else if (data?.rows) body=`Table: ${data.rows.length} rows.`; else body='No summary available.'; }
-      return <div className="article-body"><div className="article-headline">{headline}</div><div className="article-content">{body}</div></div>;
+      return (
+        <div className="article-body">
+          {wasAdopted && <div className="type-adopted-badge">auto-adopted: {cardType}</div>}
+          <div className="article-headline">{headline}</div>
+          <div className="article-content">{body}</div>
+        </div>
+      );
     }
     case 'table': {
       let headers = data?.headers, rows = data?.rows;
@@ -251,6 +366,7 @@ export function CardBody({ card, handlers }) {
       if (!headers || !rows) return <div className="card-error"><div className="err-title">No table data</div></div>;
       return (
         <div style={{ overflow:'auto', width:'100%', height:'100%' }}>
+          {wasAdopted && <div className="type-adopted-badge">auto-adopted: {cardType}</div>}
           <table className="tbl">
             <thead><tr>{headers.map((h,i)=><th key={i}>{h}</th>)}</tr></thead>
             <tbody>{rows.map((row,i)=><tr key={i}>{headers.map((h,j)=><td key={j}>{row[h]}</td>)}</tr>)}</tbody>
@@ -262,6 +378,7 @@ export function CardBody({ card, handlers }) {
       if (!data?.markers) return <div className="card-error"><div className="err-title">No map data</div></div>;
       return (
         <div className="map-body">
+          {wasAdopted && <div className="type-adopted-badge">auto-adopted: {cardType}</div>}
           <svg viewBox="0 0 300 150" width="100%" height="100%" style={{ opacity:0.1, position:'absolute' }}>
             <path d="M20,40 Q80,20 140,45 T230,35 T290,30 L290,115 Q240,128 190,108 T110,110 T40,105 Z" fill="none" stroke="#fff" strokeWidth="1.5" />
           </svg>
@@ -281,6 +398,7 @@ export function CardBody({ card, handlers }) {
     case 'media':
       return (
         <div style={{ height:'100%', display:'flex', flexDirection:'column', gap:6 }}>
+          {wasAdopted && <div className="type-adopted-badge">auto-adopted: {cardType}</div>}
           <img src={data?.url||'https://images.unsplash.com/photo-1639762681057-408e52192e55?w=600&auto=format&fit=crop'} alt={data?.caption||''} style={{ width:'100%', flex:1, minHeight:0, objectFit:'cover', borderRadius:8 }} />
           {data?.caption && <div style={{ fontSize:10, color:'var(--fg-muted)' }}>{data.caption}</div>}
         </div>
@@ -290,6 +408,7 @@ export function CardBody({ card, handlers }) {
       if (!list.length) return <div className="card-error"><div className="err-title">No feed data</div></div>;
       return (
         <div className="feed-list">
+          {wasAdopted && <div className="type-adopted-badge">auto-adopted: {cardType}</div>}
           {list.map((item,i) => {
             const title = item.title || item.headline || item.text || item.name || `Item ${i+1}`;
             const sub = item.time || item.date || (item.done!==undefined ? (item.done?'Done':'Pending') : '');
@@ -314,6 +433,7 @@ export function CardBody({ card, handlers }) {
         const pct = Math.round((done/total)*100);
         return (
           <div className="inter-body">
+            {wasAdopted && <div className="type-adopted-badge">auto-adopted: {cardType}</div>}
             <div className="progress-bar"><div className="progress-fill" style={{ width:`${pct}%`, background:renderSpec?.color||'var(--primary)' }} /></div>
             <div style={{ display:'flex', flexDirection:'column', gap:4, flex:1, overflowY:'auto' }}>
               {data.items?.map(item => (

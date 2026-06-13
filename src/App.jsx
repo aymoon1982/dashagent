@@ -186,7 +186,7 @@ export default function App() {
       try {
         const classRes = await fetch(`${base}/chat/completions`, {
           method:'POST', headers:{ 'Content-Type':'application/json', 'Authorization':`Bearer ${key}` },
-          body: JSON.stringify({ model: modelFast, messages:[{ role:'system', content:'Classify dashboard card. Return JSON only: {"cardType":"chart|stat|article|table|map|interactive|feed|media","size":"xs|sm|md|lg|xl","dataSource":"string","searchRequired":true|false}' },{ role:'user', content:`Prompt: "${promptText}"` }], temperature: workflowConfig.classifierTemp, response_format:{ type:'json_object' } })
+          body: JSON.stringify({ model: modelFast, messages:[{ role:'system', content:'Classify dashboard card. Return JSON only: {"cardType":"chart|stat|article|table|map|interactive|feed|media|custom","size":"xs|sm|md|lg|xl","dataSource":"string","searchRequired":true|false}. Use "custom" when the visualization needs unique rendering that none of the standard types support well — e.g. word clouds, network graphs, Gantt charts, heatmaps, radial gauges, or highly bespoke layouts.' },{ role:'user', content:`Prompt: "${promptText}"` }], temperature: workflowConfig.classifierTemp, response_format:{ type:'json_object' } })
         });
         if (classRes.ok) { const cj = await classRes.json(); const ct = cj.choices?.[0]?.message?.content?.trim(); if (ct) { const p = JSON.parse(ct.replace(/^```json\s*/i,'').replace(/```$/,'')); if (p.cardType) classification = p; } }
       } catch (e) { console.warn('Classifier failed:', e); }
@@ -199,14 +199,18 @@ export default function App() {
         } catch (e) { console.warn('Tavily failed:', e); }
       }
 
-      const sysPrompt = `You are a dashboard card planner. Return ONLY valid JSON with this schema: {"title":"string","cardType":"${classification.cardType}","size":"${classification.size}","dataSource":"string","refreshInterval":0,"data":{},"renderSpec":{"chartType":"line|bar|area|pie","xField":"string","yField":"string","color":"#hex","summary":"string"}}. Include rich structured data arrays. Be concise.`;
+      const isCustom = classification.cardType === 'custom';
+      const sysPrompt = isCustom
+        ? `You are a dashboard card planner that writes custom React rendering code. Return ONLY valid JSON with this exact schema: {"title":"string","cardType":"custom","size":"${classification.size}","dataSource":"string","refreshInterval":0,"data":{},"renderSpec":{"color":"#hex","summary":"string"},"renderCode":"<JS function body>"}. The "renderCode" field must be the body of a JavaScript function with signature (React, data, renderSpec) that returns a React element tree using React.createElement() — no JSX. Available CSS variables: var(--fg), var(--fg-muted), var(--fg-dim), var(--primary), var(--success), var(--danger), var(--warning), var(--border), var(--bg). The "data" field should contain structured data appropriate for the visualization. Make it visually rich, informative, and appropriate to the user's request. Keep renderCode under 60 lines.`
+        : `You are a dashboard card planner. Return ONLY valid JSON with this schema: {"title":"string","cardType":"${classification.cardType}","size":"${classification.size}","dataSource":"string","refreshInterval":0,"data":{},"renderSpec":{"chartType":"line|bar|area|pie","xField":"string","yField":"string","color":"#hex","summary":"string"}}. Include rich structured data arrays. Be concise.`;
+
       const userMsg = searchContext ? `Prompt: ${promptText}\n\nSearch context:\n${searchContext}` : `Prompt: ${promptText}`;
       const planRes = await fetch(`${base}/chat/completions`, { method:'POST', headers:{'Content-Type':'application/json','Authorization':`Bearer ${key}`}, body: JSON.stringify({ model: modelSmart, messages:[{role:'system',content:sysPrompt},{role:'user',content:userMsg}], temperature: workflowConfig.plannerTemp, response_format:{type:'json_object'} }) });
       if (!planRes.ok) throw new Error(`API error: ${planRes.statusText}`);
       const raw = await planRes.json();
       const payload = JSON.parse(raw.choices[0].message.content.trim().replace(/^```json\s*/i,'').replace(/```$/,''));
       const { cols, rows } = sizeToGrid(payload.size || classification.size);
-      return { id: existingCardId || Math.random().toString(36).slice(2,9), prompt: promptText, title: payload.title||'AI Card', cardType: payload.cardType||classification.cardType, size: payload.size||classification.size, dataSource: searchContext ? 'Tavily Web Search' : (payload.dataSource||'AI Knowledge'), refreshInterval: payload.refreshInterval||0, group: getGroupName(), cols, rows, data: payload.data, renderSpec: payload.renderSpec||{}, lastFetched: new Date().toISOString(), loading:false, error:null };
+      return { id: existingCardId || Math.random().toString(36).slice(2,9), prompt: promptText, title: payload.title||'AI Card', cardType: payload.cardType||classification.cardType, size: payload.size||classification.size, dataSource: searchContext ? 'Tavily Web Search' : (payload.dataSource||'AI Knowledge'), refreshInterval: payload.refreshInterval||0, group: getGroupName(), cols, rows, data: payload.data, renderSpec: payload.renderSpec||{}, renderCode: payload.renderCode||null, lastFetched: new Date().toISOString(), loading:false, error:null };
     } catch (err) { console.error('Pipeline error:', err); throw err; }
   };
 
@@ -246,7 +250,7 @@ export default function App() {
     setCards(prev => prev.map(c => {
       if (c.id !== cardId) return c;
       if (!workflowConfig.autoResizeOnOverride) return { ...c, cardType: newType };
-      const sizeMap = { stat:{cols:3,rows:1,size:'xs'}, chart:{cols:6,rows:2,size:'md'}, table:{cols:6,rows:3,size:'lg'}, article:{cols:6,rows:2,size:'md'}, map:{cols:6,rows:3,size:'lg'}, media:{cols:4,rows:2,size:'sm'}, feed:{cols:6,rows:2,size:'md'}, interactive:{cols:4,rows:2,size:'sm'} };
+      const sizeMap = { stat:{cols:3,rows:1,size:'xs'}, chart:{cols:6,rows:2,size:'md'}, table:{cols:6,rows:3,size:'lg'}, article:{cols:6,rows:2,size:'md'}, map:{cols:6,rows:3,size:'lg'}, media:{cols:4,rows:2,size:'sm'}, feed:{cols:6,rows:2,size:'md'}, interactive:{cols:4,rows:2,size:'sm'}, custom:{cols:6,rows:3,size:'lg'} };
       const dim = sizeMap[newType] || {};
       return { ...c, cardType: newType, ...(dim.cols && { cols:dim.cols, rows:dim.rows, size:dim.size }) };
     }));
