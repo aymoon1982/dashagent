@@ -32,7 +32,9 @@ const DEFAULT_GROUPS = [
 ];
 
 /* ─── FIXED SYSTEM PROMPT ─── */
-export const FIXED_SYSTEM_PROMPT = `You are a dashboard card generator for Agntdash, an AI-native fluid grid dashboard.
+export const FIXED_SYSTEM_PROMPT = `You are a dashboard card generator for Agntdash. CRITICAL: respond with ONLY a raw JSON object — no markdown code fences, no explanation text, no preamble. Start your response with { and end with }.
+
+You are an AI-native fluid grid dashboard card generator.
 
 ## Your Mission (execute in this exact order)
 
@@ -203,40 +205,56 @@ export default function App() {
     setIsSettingsOpen(false);
   };
 
+  /* ─── JSON EXTRACTION (robust, model-agnostic) ─── */
+  const extractJSON = (text) => {
+    if (!text) throw new Error('Empty response from model');
+    // 1. Try direct parse
+    try { return JSON.parse(text); } catch (_) {}
+    // 2. Strip all markdown code fences then retry
+    const stripped = text.replace(/^```(?:json)?\s*/im, '').replace(/```\s*$/m, '').trim();
+    try { return JSON.parse(stripped); } catch (_) {}
+    // 3. Find the outermost {...} block
+    const start = text.indexOf('{');
+    const end = text.lastIndexOf('}');
+    if (start !== -1 && end > start) {
+      try { return JSON.parse(text.slice(start, end + 1)); } catch (_) {}
+    }
+    throw new Error('Model returned non-JSON response. Try a different smart model.');
+  };
+
   /* ─── AGENT PIPELINE (3-stage) ─── */
   const runAgentPipeline = async (promptText, existingCardId = null) => {
     const key = activeProvider==='openrouter' ? openRouterKey : activeProvider==='openai' ? openAIKey : openCodeKey;
     const base = activeProvider==='openrouter' ? 'https://openrouter.ai/api/v1' : activeProvider==='openai' ? openAIBaseUrl : openCodeBaseUrl;
     const getGroup = () => existingCardId ? (cards.find(c=>c.id===existingCardId)?.group || 'Personal') : 'Personal';
     const sizeToGrid = size => size==='xs'?{cols:3,rows:1}:size==='sm'?{cols:4,rows:2}:size==='md'?{cols:6,rows:2}:size==='lg'?{cols:6,rows:3}:{cols:12,rows:3};
+    const llm = (model, messages, temp = 0.3) => fetch(`${base}/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type':'application/json', 'Authorization':`Bearer ${key}` },
+      body: JSON.stringify({ model, messages, temperature: temp, max_tokens: 4096 })
+    });
 
     if (!key) throw new Error('No API key configured. Open Settings to connect an LLM provider.');
 
     // Stage 1: Intent analysis — does this prompt need live web search?
     let intent = { needs_search: false, search_query: promptText };
     try {
-      const ir = await fetch(`${base}/chat/completions`, {
-        method: 'POST',
-        headers: { 'Content-Type':'application/json', 'Authorization':`Bearer ${key}` },
-        body: JSON.stringify({
-          model: modelFast,
-          messages: [
-            { role:'system', content:'You analyze dashboard prompts. Return ONLY valid JSON: {"needs_search":boolean,"search_query":"optimized search query"}. Set needs_search=true only for prompts that require current/live data (prices, news, weather, scores, recent events). Set needs_search=false for calculations, conversions, countdowns, checklists, or anything not requiring up-to-date information.' },
-            { role:'user', content: promptText }
-          ],
-          temperature: 0.1,
-          response_format: { type:'json_object' }
-        })
-      });
+      const ir = await llm(modelFast, [
+        { role:'system', content:'You analyze dashboard prompts. Respond with ONLY a JSON object (no markdown): {"needs_search":true/false,"search_query":"concise search query"}. needs_search=true for: live prices, today\'s news, current weather, sports scores, recent exchange rates, any real-time data. needs_search=false for: math, conversions, countdowns, static checklists, general knowledge charts.' },
+        { role:'user', content: promptText }
+      ], 0.1);
       if (ir.ok) {
         const ij = await ir.json();
-        const parsed = JSON.parse(ij.choices[0].message.content);
+        const content = ij.choices?.[0]?.message?.content || '';
+        const parsed = extractJSON(content);
         intent = { needs_search: !!parsed.needs_search, search_query: parsed.search_query || promptText };
+      } else {
+        throw new Error(`Stage 1 API error: ${ir.status}`);
       }
-    } catch (_) {
-      // Keyword fallback if fast model fails
+    } catch (e) {
+      console.warn('Intent analysis failed, using keyword fallback:', e.message);
       const lc = promptText.toLowerCase();
-      intent.needs_search = /\b(news|today|current|latest|live|price|weather|score|stock|rate|forecast|breaking|update|now|recent|this week|this month)\b/.test(lc);
+      intent.needs_search = /\b(news|today|current|latest|live|price|rate|exchange|weather|score|stock|forecast|breaking|update|now|recent|this week|this month|chart|history|historical)\b/.test(lc);
     }
 
     // Stage 2: Conditional Tavily web search
@@ -259,26 +277,33 @@ export default function App() {
       } catch (e) { console.warn('Tavily search failed:', e); }
     }
 
-    // Stage 3: Code generation (smart model)
+    // Stage 3: Code generation (smart model) — no response_format for max model compatibility
     const userPref = workflowConfig.userSystemPrompt?.trim();
     const sysContent = FIXED_SYSTEM_PROMPT + (userPref ? `\n\n---\n## User Preferences\n${userPref}` : '');
     const userMsg = searchContext
       ? `User request: ${promptText}\n\nLive search results (use as primary data source):\n${searchContext}`
       : `User request: ${promptText}`;
 
-    const res = await fetch(`${base}/chat/completions`, {
-      method: 'POST',
-      headers: { 'Content-Type':'application/json', 'Authorization':`Bearer ${key}` },
-      body: JSON.stringify({ model: modelSmart, messages:[{role:'system',content:sysContent},{role:'user',content:userMsg}], temperature: workflowConfig.plannerTemp || 0.3, response_format:{type:'json_object'} })
-    });
-    if (!res.ok) throw new Error(`API error: ${res.status} ${res.statusText}`);
+    const res = await llm(modelSmart, [{role:'system',content:sysContent},{role:'user',content:userMsg}], workflowConfig.plannerTemp || 0.3);
+    if (!res.ok) {
+      const errBody = await res.text().catch(() => '');
+      throw new Error(`Code generator failed (${res.status}): ${errBody.slice(0,200) || res.statusText}`);
+    }
     const raw = await res.json();
-    const payload = JSON.parse(raw.choices[0].message.content.trim().replace(/^```json\s*/i,'').replace(/```$/,''));
+    const content = raw.choices?.[0]?.message?.content;
+    if (!content) throw new Error('Model returned an empty response. Try again or switch models.');
 
-    // Validate renderCode syntax before committing
+    const payload = extractJSON(content);
+
+    // Validate renderCode syntax — non-fatal, card will show a render error instead
     if (payload.renderCode) {
-      // eslint-disable-next-line no-new-func
-      new Function('React', '"use strict"; return (' + payload.renderCode + ')');
+      try {
+        // eslint-disable-next-line no-new-func
+        new Function('React', 'return (' + payload.renderCode + ')');
+      } catch (syntaxErr) {
+        console.warn('renderCode syntax warning:', syntaxErr.message);
+        payload.renderSpec = { ...(payload.renderSpec||{}), summary: `⚠ Render issue: ${syntaxErr.message}` };
+      }
     }
 
     const { cols, rows } = sizeToGrid(payload.size || 'md');
