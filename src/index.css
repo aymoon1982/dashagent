@@ -669,6 +669,48 @@ body {
 .settings-bd { flex: 1; overflow-y: auto; padding: 18px 20px; display: flex; flex-direction: column; gap: 22px; }
 .settings-ft { padding: 14px 20px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 8px; flex-shrink: 0; }
 
+/* Missing-key banner */
+.settings-missing-key {
+  display: flex; gap: 12px; align-items: flex-start;
+  background: rgba(239,68,68,.08);
+  border: 1px solid rgba(239,68,68,.3);
+  border-radius: var(--rm);
+  padding: 12px 14px;
+  color: #fca5a5;
+  margin-bottom: 4px;
+}
+.smk-title { font-size: 12px; font-weight: 700; margin-bottom: 3px; }
+.smk-desc { font-size: 10px; color: #fca5a5cc; line-height: 1.5; }
+.smk-desc code { background: rgba(239,68,68,.15); border-radius: 3px; padding: 0 4px; font-family: monospace; font-size: 10px; }
+
+/* Env-locked inputs */
+.env-input-wrap { position: relative; display: flex; align-items: center; }
+.env-input-wrap .form-in { padding-right: 52px; }
+.form-in.env-locked {
+  background: rgba(99,102,241,.06);
+  border-color: rgba(99,102,241,.3);
+  color: var(--fg-dim);
+  cursor: not-allowed;
+  font-style: italic;
+  flex: 1;
+}
+.env-badge {
+  position: absolute; right: 8px;
+  display: flex; align-items: center; gap: 2px;
+  font-size: 8px; font-weight: 800; letter-spacing: .08em;
+  color: var(--primary); background: rgba(99,102,241,.15);
+  border: 1px solid rgba(99,102,241,.35);
+  border-radius: 4px; padding: 2px 5px;
+  pointer-events: none; white-space: nowrap;
+}
+.env-notice {
+  display: flex; align-items: center; gap: 4px;
+  font-size: 10px; color: var(--fg-dim);
+  margin-bottom: 10px;
+}
+.env-notice code { font-size: 10px; color: var(--primary); }
+.form-help code { font-size: 10px; color: var(--fg-muted); background: rgba(255,255,255,.05); padding: 0 4px; border-radius: 3px; }
+
 .settings-sec h4 {
   font-size: 10px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase;
   color: var(--fg-dim);

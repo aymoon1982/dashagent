@@ -44,7 +44,7 @@ export function AppHeader({ activeView, setActiveView, isApiConnected, onOpenSet
 }
 
 /* ─── SETTINGS DRAWER ─── */
-export function SettingsDrawer({ isOpen, onClose, activeProvider, openRouterKey, openAIKey, openAIBaseUrl, openCodeKey, openCodeBaseUrl, tavilyKey, modelFast, modelSmart, onSave }) {
+export function SettingsDrawer({ isOpen, onClose, activeProvider, openRouterKey, openAIKey, openAIBaseUrl, openCodeKey, openCodeBaseUrl, tavilyKey, modelFast, modelSmart, envSources = {}, onSave }) {
   const [localProvider, setLocalProvider] = useState(activeProvider);
   const [localORKey, setLocalORKey] = useState(openRouterKey);
   const [localOAIKey, setLocalOAIKey] = useState(openAIKey);
@@ -66,6 +66,47 @@ export function SettingsDrawer({ isOpen, onClose, activeProvider, openRouterKey,
       setLocalTavily(tavilyKey); setLocalFast(modelFast); setLocalSmart(modelSmart);
     }
   }, [isOpen]);
+
+  // Derive whether the active provider's key is missing
+  const activeKeyMissing = (() => {
+    if (localProvider === 'openrouter') return !localORKey;
+    if (localProvider === 'openai')     return !localOAIKey;
+    if (localProvider === 'opencode')   return !localOCKey;
+    return false;
+  })();
+
+  const ENV_VAR_NAMES = {
+    openRouterKey: 'VITE_OPENROUTER_KEY',
+    openAIKey: 'VITE_OPENAI_KEY',
+    openAIBaseUrl: 'VITE_OPENAI_BASE_URL',
+    openCodeKey: 'VITE_OPENCODE_KEY',
+    openCodeBaseUrl: 'VITE_OPENCODE_BASE_URL',
+    tavilyKey: 'VITE_TAVILY_KEY',
+    modelFast: 'VITE_MODEL_FAST',
+    modelSmart: 'VITE_MODEL_SMART',
+  };
+
+  // Render an input that is read-only when backed by an env var
+  const EnvInput = ({ type = 'text', envKey, value, onChange, placeholder }) => {
+    const locked = !!envSources[envKey];
+    return (
+      <div className="env-input-wrap">
+        <input
+          type={locked ? 'text' : type}
+          className={`form-in${locked ? ' env-locked' : ''}`}
+          value={locked ? '••••••••••••  (from env)' : value}
+          onChange={locked ? undefined : onChange}
+          placeholder={placeholder}
+          readOnly={locked}
+        />
+        {locked && (
+          <span className="env-badge" title={`Set via ${ENV_VAR_NAMES[envKey]} environment variable`}>
+            <span className="material-symbols-outlined" style={{ fontSize:10 }}>lock</span>ENV
+          </span>
+        )}
+      </div>
+    );
+  };
 
   const fetchModels = async () => {
     const key = localProvider==='openrouter' ? localORKey : localProvider==='openai' ? localOAIKey : localOCKey;
@@ -107,29 +148,48 @@ export function SettingsDrawer({ isOpen, onClose, activeProvider, openRouterKey,
         </div>
 
         <div className="settings-bd">
+          {/* Missing key banner — shown when no LLM key is configured for active provider */}
+          {activeKeyMissing && (
+            <div className="settings-missing-key">
+              <span className="material-symbols-outlined" style={{ fontSize:18, flexShrink:0 }}>key_off</span>
+              <div>
+                <div className="smk-title">No API key configured</div>
+                <div className="smk-desc">
+                  Add{' '}
+                  <code>{localProvider === 'openrouter' ? 'VITE_OPENROUTER_KEY' : localProvider === 'openai' ? 'VITE_OPENAI_KEY' : 'VITE_OPENCODE_KEY'}</code>
+                  {' '}to your <code>.env.local</code> file, or enter the key below to use live AI generation. Without a key, the dashboard runs in Demo Mode with simulated responses.
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="settings-sec">
             <h4>LLM Provider</h4>
             <div className="prov-tabs">
               {[{id:'openrouter',label:'OpenRouter'},{id:'openai',label:'OpenAI / Custom'},{id:'opencode',label:'OpenCode Go'}].map(p => (
-                <button key={p.id} className={`prov-tab ${localProvider===p.id?'active':''}`} onClick={() => setLocalProvider(p.id)}>{p.label}</button>
+                <button key={p.id} className={`prov-tab ${localProvider===p.id?'active':''}`} onClick={() => !envSources.activeProvider && setLocalProvider(p.id)} style={{ opacity: envSources.activeProvider && localProvider !== p.id ? 0.45 : 1 }}>{p.label}</button>
               ))}
             </div>
+            {envSources.activeProvider && (
+              <div className="env-notice"><span className="material-symbols-outlined" style={{fontSize:11}}>lock</span> Provider locked by <code>VITE_ACTIVE_PROVIDER</code></div>
+            )}
             {localProvider === 'openrouter' && (
               <div className="form-g">
                 <label className="form-lbl">OpenRouter API Key</label>
-                <input type="password" className="form-in" placeholder="sk-or-..." value={localORKey} onChange={e => setLocalORKey(e.target.value)} />
-                <div className="form-help">Get at <a href="https://openrouter.ai/keys" target="_blank" rel="noreferrer">openrouter.ai/keys</a></div>
+                <EnvInput type="password" envKey="openRouterKey" value={localORKey} onChange={e => setLocalORKey(e.target.value)} placeholder="sk-or-..." />
+                {!envSources.openRouterKey && <div className="form-help">Get at <a href="https://openrouter.ai/keys" target="_blank" rel="noreferrer">openrouter.ai/keys</a> · or set <code>VITE_OPENROUTER_KEY</code> in <code>.env.local</code></div>}
               </div>
             )}
             {localProvider === 'openai' && (
               <>
                 <div className="form-g">
                   <label className="form-lbl">API Key</label>
-                  <input type="password" className="form-in" placeholder="sk-..." value={localOAIKey} onChange={e => setLocalOAIKey(e.target.value)} />
+                  <EnvInput type="password" envKey="openAIKey" value={localOAIKey} onChange={e => setLocalOAIKey(e.target.value)} placeholder="sk-..." />
+                  {!envSources.openAIKey && <div className="form-help">Set <code>VITE_OPENAI_KEY</code> in <code>.env.local</code></div>}
                 </div>
                 <div className="form-g">
                   <label className="form-lbl">Base URL</label>
-                  <input type="text" className="form-in" value={localOAIBase} onChange={e => setLocalOAIBase(e.target.value)} />
+                  <EnvInput envKey="openAIBaseUrl" value={localOAIBase} onChange={e => setLocalOAIBase(e.target.value)} />
                 </div>
               </>
             )}
@@ -137,11 +197,12 @@ export function SettingsDrawer({ isOpen, onClose, activeProvider, openRouterKey,
               <>
                 <div className="form-g">
                   <label className="form-lbl">API Key</label>
-                  <input type="password" className="form-in" placeholder="Key for OpenCode Go..." value={localOCKey} onChange={e => setLocalOCKey(e.target.value)} />
+                  <EnvInput type="password" envKey="openCodeKey" value={localOCKey} onChange={e => setLocalOCKey(e.target.value)} placeholder="Key for OpenCode Go..." />
+                  {!envSources.openCodeKey && <div className="form-help">Set <code>VITE_OPENCODE_KEY</code> in <code>.env.local</code></div>}
                 </div>
                 <div className="form-g">
                   <label className="form-lbl">Base URL</label>
-                  <input type="text" className="form-in" value={localOCBase} onChange={e => setLocalOCBase(e.target.value)} />
+                  <EnvInput envKey="openCodeBaseUrl" value={localOCBase} onChange={e => setLocalOCBase(e.target.value)} />
                 </div>
               </>
             )}
@@ -161,17 +222,21 @@ export function SettingsDrawer({ isOpen, onClose, activeProvider, openRouterKey,
             <div className="models-grid">
               <div className="form-g">
                 <label className="form-lbl">Classifier (Fast)</label>
-                <select className="form-sel" value={localFast} onChange={e => setLocalFast(e.target.value)}>
-                  {allFastModels.map(m => <option key={m} value={m}>{m}</option>)}
-                  {!allFastModels.includes(localFast) && <option value={localFast}>{localFast}</option>}
-                </select>
+                {envSources.modelFast
+                  ? <div className="env-input-wrap"><input className="form-in env-locked" value={localFast} readOnly /><span className="env-badge"><span className="material-symbols-outlined" style={{fontSize:10}}>lock</span>ENV</span></div>
+                  : <select className="form-sel" value={localFast} onChange={e => setLocalFast(e.target.value)}>
+                      {allFastModels.map(m => <option key={m} value={m}>{m}</option>)}
+                      {!allFastModels.includes(localFast) && <option value={localFast}>{localFast}</option>}
+                    </select>}
               </div>
               <div className="form-g">
                 <label className="form-lbl">Planner (Smart)</label>
-                <select className="form-sel" value={localSmart} onChange={e => setLocalSmart(e.target.value)}>
-                  {allSmartModels.map(m => <option key={m} value={m}>{m}</option>)}
-                  {!allSmartModels.includes(localSmart) && <option value={localSmart}>{localSmart}</option>}
-                </select>
+                {envSources.modelSmart
+                  ? <div className="env-input-wrap"><input className="form-in env-locked" value={localSmart} readOnly /><span className="env-badge"><span className="material-symbols-outlined" style={{fontSize:10}}>lock</span>ENV</span></div>
+                  : <select className="form-sel" value={localSmart} onChange={e => setLocalSmart(e.target.value)}>
+                      {allSmartModels.map(m => <option key={m} value={m}>{m}</option>)}
+                      {!allSmartModels.includes(localSmart) && <option value={localSmart}>{localSmart}</option>}
+                    </select>}
               </div>
             </div>
           </div>
@@ -180,8 +245,8 @@ export function SettingsDrawer({ isOpen, onClose, activeProvider, openRouterKey,
             <h4>Web Search</h4>
             <div className="form-g">
               <label className="form-lbl">Tavily API Key</label>
-              <input type="password" className="form-in" placeholder="tvly-..." value={localTavily} onChange={e => setLocalTavily(e.target.value)} />
-              <div className="form-help">Enables real-time web search. Get at <a href="https://tavily.com" target="_blank" rel="noreferrer">tavily.com</a></div>
+              <EnvInput type="password" envKey="tavilyKey" value={localTavily} onChange={e => setLocalTavily(e.target.value)} placeholder="tvly-..." />
+              {!envSources.tavilyKey && <div className="form-help">Enables real-time web search. Get at <a href="https://tavily.com" target="_blank" rel="noreferrer">tavily.com</a> · or set <code>VITE_TAVILY_KEY</code></div>}
             </div>
           </div>
         </div>

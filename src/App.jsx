@@ -56,21 +56,38 @@ const DEFAULT_GROUPS = [
 ];
 
 /* ─── APP ─── */
+// Module-level: which keys are provided via environment variables (set at build time)
+const ENV_SOURCES = {
+  activeProvider: !!import.meta.env.VITE_ACTIVE_PROVIDER,
+  openRouterKey:  !!import.meta.env.VITE_OPENROUTER_KEY,
+  openAIKey:      !!import.meta.env.VITE_OPENAI_KEY,
+  openAIBaseUrl:  !!import.meta.env.VITE_OPENAI_BASE_URL,
+  openCodeKey:    !!import.meta.env.VITE_OPENCODE_KEY,
+  openCodeBaseUrl:!!import.meta.env.VITE_OPENCODE_BASE_URL,
+  tavilyKey:      !!import.meta.env.VITE_TAVILY_KEY,
+  modelFast:      !!import.meta.env.VITE_MODEL_FAST,
+  modelSmart:     !!import.meta.env.VITE_MODEL_SMART,
+};
+
+// Priority: env var (read-only, build-time) > localStorage (user-saved) > default
+const envOrStorage = (envVal, lsKey, def = '') =>
+  envVal || localStorage.getItem(lsKey) || def;
+
 export default function App() {
   const [activeView, setActiveView] = useState('dashboard');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
   const load = (key, def) => { try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : def; } catch { return def; } };
 
-  const [activeProvider, setActiveProvider] = useState(() => localStorage.getItem('agntdash_active_provider') || 'openrouter');
-  const [openRouterKey, setOpenRouterKey] = useState(() => localStorage.getItem('agntdash_or_key') || '');
-  const [openAIKey, setOpenAIKey] = useState(() => localStorage.getItem('agntdash_openai_key') || '');
-  const [openAIBaseUrl, setOpenAIBaseUrl] = useState(() => localStorage.getItem('agntdash_openai_base_url') || 'https://api.openai.com/v1');
-  const [openCodeKey, setOpenCodeKey] = useState(() => localStorage.getItem('agntdash_opencode_key') || '');
-  const [openCodeBaseUrl, setOpenCodeBaseUrl] = useState(() => localStorage.getItem('agntdash_opencode_base_url') || 'https://api.opencode.go/v1');
-  const [tavilyKey, setTavilyKey] = useState(() => localStorage.getItem('agntdash_tavily_key') || '');
-  const [modelFast, setModelFast] = useState(() => localStorage.getItem('agntdash_model_fast') || DEFAULT_MODELS_FAST[0]);
-  const [modelSmart, setModelSmart] = useState(() => localStorage.getItem('agntdash_model_smart') || DEFAULT_MODELS_SMART[0]);
+  const [activeProvider, setActiveProvider] = useState(() => envOrStorage(import.meta.env.VITE_ACTIVE_PROVIDER, 'agntdash_active_provider', 'openrouter'));
+  const [openRouterKey, setOpenRouterKey] = useState(() => envOrStorage(import.meta.env.VITE_OPENROUTER_KEY, 'agntdash_or_key'));
+  const [openAIKey, setOpenAIKey] = useState(() => envOrStorage(import.meta.env.VITE_OPENAI_KEY, 'agntdash_openai_key'));
+  const [openAIBaseUrl, setOpenAIBaseUrl] = useState(() => envOrStorage(import.meta.env.VITE_OPENAI_BASE_URL, 'agntdash_openai_base_url', 'https://api.openai.com/v1'));
+  const [openCodeKey, setOpenCodeKey] = useState(() => envOrStorage(import.meta.env.VITE_OPENCODE_KEY, 'agntdash_opencode_key'));
+  const [openCodeBaseUrl, setOpenCodeBaseUrl] = useState(() => envOrStorage(import.meta.env.VITE_OPENCODE_BASE_URL, 'agntdash_opencode_base_url', 'https://api.opencode.go/v1'));
+  const [tavilyKey, setTavilyKey] = useState(() => envOrStorage(import.meta.env.VITE_TAVILY_KEY, 'agntdash_tavily_key'));
+  const [modelFast, setModelFast] = useState(() => envOrStorage(import.meta.env.VITE_MODEL_FAST, 'agntdash_model_fast', DEFAULT_MODELS_FAST[0]));
+  const [modelSmart, setModelSmart] = useState(() => envOrStorage(import.meta.env.VITE_MODEL_SMART, 'agntdash_model_smart', DEFAULT_MODELS_SMART[0]));
 
   const [cards, setCards] = useState(() => load('agntdash_cards_v2', DEFAULT_CARDS));
   const [groups, setGroups] = useState(() => load('agntdash_groups_v2', DEFAULT_GROUPS));
@@ -158,10 +175,16 @@ export default function App() {
   const saveSettings = ({ activeProvider: ap, openRouterKey: or, openAIKey: oai, openAIBaseUrl: oaib, openCodeKey: oc, openCodeBaseUrl: ocb, tavilyKey: tv, modelFast: mf, modelSmart: ms }) => {
     setActiveProvider(ap); setOpenRouterKey(or); setOpenAIKey(oai); setOpenAIBaseUrl(oaib);
     setOpenCodeKey(oc); setOpenCodeBaseUrl(ocb); setTavilyKey(tv); setModelFast(mf); setModelSmart(ms);
-    localStorage.setItem('agntdash_active_provider', ap); localStorage.setItem('agntdash_or_key', or);
-    localStorage.setItem('agntdash_openai_key', oai); localStorage.setItem('agntdash_openai_base_url', oaib);
-    localStorage.setItem('agntdash_opencode_key', oc); localStorage.setItem('agntdash_opencode_base_url', ocb);
-    localStorage.setItem('agntdash_tavily_key', tv); localStorage.setItem('agntdash_model_fast', mf); localStorage.setItem('agntdash_model_smart', ms);
+    // Only persist to localStorage what isn't already locked by an env var
+    if (!ENV_SOURCES.activeProvider)  localStorage.setItem('agntdash_active_provider', ap);
+    if (!ENV_SOURCES.openRouterKey)   localStorage.setItem('agntdash_or_key', or);
+    if (!ENV_SOURCES.openAIKey)       localStorage.setItem('agntdash_openai_key', oai);
+    if (!ENV_SOURCES.openAIBaseUrl)   localStorage.setItem('agntdash_openai_base_url', oaib);
+    if (!ENV_SOURCES.openCodeKey)     localStorage.setItem('agntdash_opencode_key', oc);
+    if (!ENV_SOURCES.openCodeBaseUrl) localStorage.setItem('agntdash_opencode_base_url', ocb);
+    if (!ENV_SOURCES.tavilyKey)       localStorage.setItem('agntdash_tavily_key', tv);
+    if (!ENV_SOURCES.modelFast)       localStorage.setItem('agntdash_model_fast', mf);
+    if (!ENV_SOURCES.modelSmart)      localStorage.setItem('agntdash_model_smart', ms);
     setIsSettingsOpen(false);
   };
 
@@ -419,6 +442,7 @@ export default function App() {
         tavilyKey={tavilyKey}
         modelFast={modelFast}
         modelSmart={modelSmart}
+        envSources={ENV_SOURCES}
         onSave={saveSettings}
       />
     </div>
