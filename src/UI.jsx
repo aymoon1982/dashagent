@@ -221,7 +221,7 @@ export function SettingsDrawer({ isOpen, onClose, activeProvider, openRouterKey,
             </div>
             <div className="models-grid">
               <div className="form-g">
-                <label className="form-lbl">Classifier (Fast)</label>
+                <label className="form-lbl">Fast Model (unused)</label>
                 {envSources.modelFast
                   ? <div className="env-input-wrap"><input className="form-in env-locked" value={localFast} readOnly /><span className="env-badge"><span className="material-symbols-outlined" style={{fontSize:10}}>lock</span>ENV</span></div>
                   : <select className="form-sel" value={localFast} onChange={e => setLocalFast(e.target.value)}>
@@ -265,11 +265,9 @@ export function SettingsDrawer({ isOpen, onClose, activeProvider, openRouterKey,
 /* ─── PIPELINE VIEW ─── */
 const STAGES = [
   { id:0, icon:'edit_note', label:'Prompt Input', sub:'Natural language intent', color:'#6366f1' },
-  { id:1, icon:'psychology', label:'Intent Classifier', sub:'Fast model routing', color:'#a855f7' },
-  { id:2, icon:'travel_explore', label:'Data Router', sub:'APIs · Search · LLM', color:'#10b981' },
-  { id:3, icon:'palette', label:'Render Planner', sub:'Smart model output', color:'#f59e0b' },
-  { id:4, icon:'tune', label:'User Override', sub:'Format switching', color:'#ec4899' },
-  { id:5, icon:'grid_view', label:'CSS Grid', sub:'Dense auto-placement', color:'#6366f1' }
+  { id:1, icon:'travel_explore', label:'Web Search', sub:'Tavily live data (optional)', color:'#10b981' },
+  { id:2, icon:'code_blocks', label:'Code Generator', sub:'LLM writes renderCode', color:'#a855f7' },
+  { id:3, icon:'grid_view', label:'CSS Grid', sub:'Dense auto-placement', color:'#f59e0b' },
 ];
 
 export function PipelineView({ workflowConfig, setWorkflowConfig, modelFast, modelSmart, activeProvider, isApiConnected, hasTavily }) {
@@ -279,9 +277,9 @@ export function PipelineView({ workflowConfig, setWorkflowConfig, modelFast, mod
   const stage = STAGES[sel];
 
   const stageActive = id => {
-    if (id === 0 || id === 4 || id === 5) return true;
-    if (id === 1 || id === 3) return isApiConnected;
-    if (id === 2) return isApiConnected || hasTavily;
+    if (id === 0 || id === 3) return true;
+    if (id === 1) return hasTavily;
+    if (id === 2) return isApiConnected;
     return false;
   };
 
@@ -297,27 +295,10 @@ export function PipelineView({ workflowConfig, setWorkflowConfig, modelFast, mod
             <span className="cfg-lbl">Show preset suggestion chips</span>
             <button className={`toggle ${cfg.enableAutocomplete?'on':'off'}`} onClick={() => set('enableAutocomplete', !cfg.enableAutocomplete)}>{cfg.enableAutocomplete?'✓ Enabled':'Disabled'}</button>
           </div>
-          <div className="cfg-io"><strong>Output:</strong> Raw text string → Stage 2 Intent Classifier</div>
+          <div className="cfg-io"><strong>Output:</strong> Prompt text → Stage 2 Web Search (if Tavily key set) → Stage 3 Code Generator</div>
         </>
       );
       case 1: return (
-        <>
-          <div className="cfg-row">
-            <span className="cfg-lbl">Classifier model</span>
-            <span className="model-tag" title={modelFast}>{modelFast}</span>
-          </div>
-          <div className="cfg-row">
-            <span className="cfg-lbl">Temperature <strong style={{ color:'var(--fg)' }}>{cfg.classifierTemp.toFixed(2)}</strong></span>
-            <input type="range" className="range" min="0" max="1" step="0.05" value={cfg.classifierTemp} onChange={e => set('classifierTemp', parseFloat(e.target.value))} />
-          </div>
-          <div className="cfg-row">
-            <span className="cfg-lbl">Cache TTL <strong style={{ color:'var(--fg)' }}>{cfg.classifierCacheTtl}s</strong></span>
-            <input type="range" className="range" min="0" max="3600" step="60" value={cfg.classifierCacheTtl} onChange={e => set('classifierCacheTtl', parseInt(e.target.value))} />
-          </div>
-          <div className="cfg-io"><strong>Output:</strong> cardType · size · dataSource · searchRequired → Stage 3</div>
-        </>
-      );
-      case 2: return (
         <>
           <div className="cfg-row">
             <span className="cfg-lbl">Force web search on all prompts</span>
@@ -330,40 +311,23 @@ export function PipelineView({ workflowConfig, setWorkflowConfig, modelFast, mod
               <option value="advanced">Advanced</option>
             </select>
           </div>
-          <div className="cfg-row">
-            <span className="cfg-lbl">Allow parametric (LLM knowledge) fallback</span>
-            <button className={`toggle ${cfg.allowParametricFallback?'on':'off'}`} onClick={() => set('allowParametricFallback', !cfg.allowParametricFallback)}>{cfg.allowParametricFallback?'✓ Enabled':'Disabled'}</button>
-          </div>
-          <div className="cfg-io"><strong>Status:</strong> Tavily key {hasTavily ? '✓ Connected' : '✗ Not configured'} · {isApiConnected ? `${activeProvider} LLM active` : 'Simulation mode'}</div>
+          <div className="cfg-io"><strong>Status:</strong> Tavily key {hasTavily ? '✓ Connected — search results injected into LLM context' : '✗ Not configured — LLM uses its own knowledge'}</div>
         </>
       );
-      case 3: return (
+      case 2: return (
         <>
           <div className="cfg-row">
-            <span className="cfg-lbl">Planner model</span>
+            <span className="cfg-lbl">Code generator model</span>
             <span className="model-tag" title={modelSmart}>{modelSmart}</span>
           </div>
           <div className="cfg-row">
-            <span className="cfg-lbl">Planner temperature <strong style={{ color:'var(--fg)' }}>{cfg.plannerTemp.toFixed(2)}</strong></span>
+            <span className="cfg-lbl">Temperature <strong style={{ color:'var(--fg)' }}>{cfg.plannerTemp.toFixed(2)}</strong></span>
             <input type="range" className="range" min="0" max="1" step="0.05" value={cfg.plannerTemp} onChange={e => set('plannerTemp', parseFloat(e.target.value))} />
           </div>
-          <div className="cfg-io"><strong>Output:</strong> JSON with title · cardType · size · data · renderSpec → Stage 4</div>
+          <div className="cfg-io"><strong>Output:</strong> JSON with title · size · data · renderSpec · renderCode (React.createElement function) → Stage 4</div>
         </>
       );
-      case 4: return (
-        <>
-          <div className="cfg-row">
-            <span className="cfg-lbl">Auto-resize card when format changes</span>
-            <button className={`toggle ${cfg.autoResizeOnOverride?'on':'off'}`} onClick={() => set('autoResizeOnOverride', !cfg.autoResizeOnOverride)}>{cfg.autoResizeOnOverride?'✓ Enabled':'Disabled'}</button>
-          </div>
-          <div className="cfg-row">
-            <span className="cfg-lbl">Allow raw JSON edit mode</span>
-            <button className={`toggle ${cfg.allowRawJsonEdit?'on':'off'}`} onClick={() => set('allowRawJsonEdit', !cfg.allowRawJsonEdit)}>{cfg.allowRawJsonEdit?'✓ Enabled':'Disabled'}</button>
-          </div>
-          <div className="cfg-io"><strong>Formats:</strong> chart · stat · article · table · map · interactive · feed · media — user can switch any card to any compatible format instantly</div>
-        </>
-      );
-      case 5: return (
+      case 3: return (
         <>
           <div className="cfg-row">
             <span className="cfg-lbl">Dense grid packing</span>

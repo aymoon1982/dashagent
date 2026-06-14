@@ -18,35 +18,242 @@ const SAMPLE_PROMPTS = [
 ];
 
 const DEFAULT_WORKFLOW_CONFIG = {
-  enableAutocomplete: true, clearOnSubmit: true, classifierTemp: 0.1,
-  classifierCacheTtl: 300, prioritizeSearch: false, allowParametricFallback: true,
-  tavilyDepth: 'basic', plannerTemp: 0.3, defaultThemeAccent: '#6366f1',
-  autoResizeOnOverride: true, allowRawJsonEdit: false, densePacking: true,
-  defaultSortOrder: 'none', gridSnapUnit: 8,
+  enableAutocomplete: true, clearOnSubmit: true, plannerTemp: 0.3,
+  tavilyDepth: 'basic', prioritizeSearch: false,
+  defaultThemeAccent: '#6366f1', densePacking: true, gridSnapUnit: 8,
 };
 
+/* ─── RENDER CODE LIBRARY (demo mode pre-built renderers) ─── */
+
+const RC_BTC = `function CardRenderer({data, renderSpec}) {
+  var arr = Array.isArray(data) ? data : [];
+  if (!arr.length) return React.createElement('div',{style:{color:'var(--fg-dim)',textAlign:'center',padding:20,fontSize:12}},'No data');
+  var color = (renderSpec && renderSpec.color) || '#10b981';
+  var vals = arr.map(function(d){return Number(d.value)||0;});
+  var maxV = Math.max.apply(null,vals)*1.1, minV = Math.min.apply(null,vals)*0.92;
+  var W=280, H=96, pL=38, pB=16, pT=8, pR=8;
+  function gx(i){return pL+(i/(arr.length-1||1))*(W-pL-pR);}
+  function gy(v){return H-pB-((v-minV)/(maxV-minV||1))*(H-pT-pB);}
+  var pts = arr.map(function(d,i){return gx(i)+','+gy(d.value);}).join(' ');
+  var area = gx(0)+','+(H-pB)+' '+pts+' '+gx(arr.length-1)+','+(H-pB);
+  var last = vals[vals.length-1], prev = vals[vals.length-2]||last;
+  var chg = prev ? ((last-prev)/prev*100).toFixed(1) : '0.0';
+  var up = parseFloat(chg) >= 0;
+  return React.createElement('div',{style:{display:'flex',flexDirection:'column',height:'100%',gap:4,padding:'4px 2px'}},
+    React.createElement('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'baseline'}},
+      React.createElement('span',{style:{fontSize:15,fontWeight:700,color:color,fontFamily:'var(--mo)'}},'$'+(last||0).toLocaleString()),
+      React.createElement('span',{style:{fontSize:10,color:up?'var(--success)':'var(--danger)',fontWeight:600}},(up?'+':'')+chg+'%')
+    ),
+    React.createElement('svg',{viewBox:'0 0 '+W+' '+H,width:'100%',height:H,style:{flex:'0 0 auto'}},
+      React.createElement('defs',null,
+        React.createElement('linearGradient',{id:'btcGrad',x1:'0',y1:'0',x2:'0',y2:'1'},
+          React.createElement('stop',{offset:'0%',stopColor:color,stopOpacity:'0.35'}),
+          React.createElement('stop',{offset:'100%',stopColor:color,stopOpacity:'0.02'})
+        )
+      ),
+      React.createElement('polygon',{points:area,fill:'url(#btcGrad)'}),
+      React.createElement('polyline',{points:pts,fill:'none',stroke:color,strokeWidth:'2.2',strokeLinecap:'round',strokeLinejoin:'round'}),
+      ...arr.map(function(d,i){return React.createElement('circle',{key:'c'+i,cx:gx(i),cy:gy(d.value),r:'2.8',fill:'#0b0b14',stroke:color,strokeWidth:'1.5'});}),
+      ...arr.map(function(d,i){return React.createElement('text',{key:'x'+i,x:gx(i),y:H-1,fill:'rgba(255,255,255,0.28)',fontSize:'8',textAnchor:'middle'},d.name?String(d.name).slice(0,3):'');}),
+      React.createElement('text',{x:pL-3,y:gy(maxV)+4,fill:'rgba(255,255,255,0.28)',fontSize:'8',textAnchor:'end'},maxV>1000?'$'+(maxV/1000).toFixed(0)+'k':Math.round(maxV))
+    ),
+    renderSpec&&renderSpec.summary ? React.createElement('p',{style:{fontSize:10,color:'var(--fg-muted)',margin:0,padding:'0 2px'}},'\\u{1F4A1} '+renderSpec.summary) : null
+  );
+}`;
+
+const RC_WEATHER = `function CardRenderer({data, renderSpec}) {
+  var headers = data && data.headers ? data.headers : ['City','Temp','Condition','Wind'];
+  var rows = data && data.rows ? data.rows : [];
+  if (!rows.length) return React.createElement('div',{style:{color:'var(--fg-dim)',textAlign:'center',padding:20,fontSize:12}},'No weather data');
+  var color = (renderSpec&&renderSpec.color)||'var(--primary)';
+  return React.createElement('div',{style:{overflow:'auto',height:'100%',width:'100%'}},
+    React.createElement('table',{style:{width:'100%',borderCollapse:'collapse',fontSize:11}},
+      React.createElement('thead',null,
+        React.createElement('tr',null,
+          ...headers.map(function(h){return React.createElement('th',{key:h,style:{textAlign:'left',padding:'5px 8px',fontSize:9,fontWeight:700,letterSpacing:'0.08em',color:'var(--fg-dim)',borderBottom:'1px solid var(--border)',textTransform:'uppercase'}},h);})
+        )
+      ),
+      React.createElement('tbody',null,
+        ...rows.map(function(row,i){return React.createElement('tr',{key:i,style:{background:i%2?'rgba(255,255,255,0.02)':'transparent'}},
+          ...headers.map(function(h){return React.createElement('td',{key:h,style:{padding:'6px 8px',color:h==='Temp'?color:'var(--fg)',fontWeight:h==='Temp'?600:400,borderBottom:'1px solid rgba(255,255,255,0.04)'}},row[h]||'');})
+        );})
+      )
+    )
+  );
+}`;
+
+const RC_NEWS = `function CardRenderer({data, renderSpec}) {
+  var items = Array.isArray(data) ? data : (data&&data.items ? data.items : []);
+  if (!items.length) return React.createElement('div',{style:{color:'var(--fg-dim)',textAlign:'center',padding:20,fontSize:12}},'No news');
+  var color = (renderSpec&&renderSpec.color)||'var(--primary)';
+  return React.createElement('div',{style:{display:'flex',flexDirection:'column',gap:0,height:'100%',overflowY:'auto'}},
+    ...items.map(function(item,i){
+      return React.createElement('div',{key:i,style:{display:'flex',gap:8,padding:'7px 4px',borderBottom:'1px solid rgba(255,255,255,0.05)',alignItems:'flex-start'}},
+        React.createElement('div',{style:{width:3,minWidth:3,height:28,borderRadius:2,background:color,marginTop:3,opacity:Math.max(0.3,1-i*0.15),flexShrink:0}}),
+        React.createElement('div',{style:{flex:1,minWidth:0}},
+          React.createElement('a',{href:item.url||'#',style:{fontSize:11,fontWeight:500,color:'var(--fg)',textDecoration:'none',lineHeight:1.35,display:'block',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},item.title||item.headline||item.text||'Untitled'),
+          React.createElement('span',{style:{fontSize:9,color:'var(--fg-dim)',marginTop:2,display:'block'}},item.time||item.date||item.source||'')
+        )
+      );
+    })
+  );
+}`;
+
+const RC_CHECKLIST = `function CardRenderer({data, renderSpec}) {
+  var items = data&&data.items ? data.items : [];
+  var color = (renderSpec&&renderSpec.color)||'var(--primary)';
+  var initDone = items.map(function(i){return !!i.done;});
+  var state = React.useState(initDone);
+  var checked = state[0], setChecked = state[1];
+  var toggle = function(i){setChecked(function(prev){var n=prev.slice();n[i]=!n[i];return n;});};
+  var doneCount = checked.filter(Boolean).length;
+  var pct = items.length ? Math.round(doneCount/items.length*100) : 0;
+  return React.createElement('div',{style:{display:'flex',flexDirection:'column',height:'100%',gap:8,padding:'2px'}},
+    React.createElement('div',{style:{height:4,background:'rgba(255,255,255,0.08)',borderRadius:2,overflow:'hidden'}},
+      React.createElement('div',{style:{height:'100%',width:pct+'%',background:color,borderRadius:2,transition:'width 0.3s ease'}})
+    ),
+    React.createElement('div',{style:{fontSize:9,color:'var(--fg-dim)',textAlign:'right',marginTop:-4}},doneCount+'/'+items.length+' done ('+pct+'%)'),
+    React.createElement('div',{style:{display:'flex',flexDirection:'column',gap:4,flex:1,overflowY:'auto'}},
+      ...items.map(function(item,i){
+        return React.createElement('label',{key:i,style:{display:'flex',alignItems:'center',gap:8,cursor:'pointer',padding:'4px 0',borderBottom:'1px solid rgba(255,255,255,0.04)'}},
+          React.createElement('input',{type:'checkbox',checked:!!checked[i],onChange:function(){toggle(i);},style:{accentColor:color,width:14,height:14,flexShrink:0}}),
+          React.createElement('span',{style:{fontSize:11,color:checked[i]?'var(--fg-dim)':'var(--fg)',textDecoration:checked[i]?'line-through':'none',transition:'all 0.2s'}},item.text||item.label||('Task '+(i+1)))
+        );
+      })
+    )
+  );
+}`;
+
+const RC_CONVERTER = `function CardRenderer({data, renderSpec}) {
+  var color = (renderSpec&&renderSpec.color)||'var(--warning)';
+  var init = data&&data.initialValue!=null ? Number(data.initialValue) : 120;
+  var fromUnit = (data&&data.fromUnit)||'miles';
+  var toUnit = (data&&data.toUnit)||'km';
+  var state = React.useState(String(init));
+  var val = state[0], setVal = state[1];
+  var result = (parseFloat(val)||0)*1.60934;
+  return React.createElement('div',{style:{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',height:'100%',gap:12,padding:'8px'}},
+    React.createElement('div',{style:{fontSize:10,fontWeight:700,color:'var(--fg-dim)',letterSpacing:'0.1em',textTransform:'uppercase'}},fromUnit+' \\u2192 '+toUnit),
+    React.createElement('div',{style:{display:'flex',alignItems:'center',gap:12,width:'100%',justifyContent:'center'}},
+      React.createElement('div',{style:{display:'flex',flexDirection:'column',alignItems:'center',gap:4}},
+        React.createElement('input',{type:'number',value:val,onChange:function(e){setVal(e.target.value);},style:{width:80,padding:'6px 10px',background:'rgba(255,255,255,0.06)',border:'1px solid var(--border)',borderRadius:6,color:'var(--fg)',fontSize:16,fontWeight:600,fontFamily:'var(--mo)',textAlign:'center',outline:'none'}}),
+        React.createElement('span',{style:{fontSize:9,color:'var(--fg-dim)',textTransform:'uppercase',letterSpacing:'0.1em'}},fromUnit)
+      ),
+      React.createElement('span',{style:{fontSize:18,color:'var(--fg-dim)'}},'\\u2192'),
+      React.createElement('div',{style:{display:'flex',flexDirection:'column',alignItems:'center',gap:4}},
+        React.createElement('div',{style:{fontSize:18,fontWeight:700,color:color,fontFamily:'var(--mo)',padding:'6px 10px',background:'rgba(255,255,255,0.04)',borderRadius:6,minWidth:80,textAlign:'center'}},result.toFixed(2)),
+        React.createElement('span',{style:{fontSize:9,color:'var(--fg-dim)',textTransform:'uppercase',letterSpacing:'0.1em'}},toUnit)
+      )
+    ),
+    renderSpec&&renderSpec.summary?React.createElement('div',{style:{fontSize:9,color:'var(--fg-dim)',textAlign:'center'}},renderSpec.summary):null
+  );
+}`;
+
+const RC_COUNTDOWN = `function CardRenderer({data, renderSpec}) {
+  var color = (renderSpec&&renderSpec.color)||'var(--danger)';
+  var targetDate = (data&&data.targetDate) || '2027-01-01T00:00:00';
+  var label = (data&&data.label) || ('Countdown to '+(new Date(targetDate).getFullYear()));
+  var state = React.useState('Loading...');
+  var timeLeft = state[0], setTimeLeft = state[1];
+  React.useEffect(function(){
+    var target = new Date(targetDate).getTime();
+    function tick(){
+      var diff = target - Date.now();
+      if(diff<=0){setTimeLeft('Completed! \\u{1F389}');return;}
+      var d=Math.floor(diff/86400000);
+      var h=Math.floor((diff%86400000)/3600000);
+      var m=Math.floor((diff%3600000)/60000);
+      var s=Math.floor((diff%60000)/1000);
+      setTimeLeft(d+'d '+String(h).padStart(2,'0')+'h '+String(m).padStart(2,'0')+'m '+String(s).padStart(2,'0')+'s');
+    }
+    tick();
+    var t=setInterval(tick,1000);
+    return function(){clearInterval(t);};
+  },[targetDate]);
+  return React.createElement('div',{style:{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',height:'100%',gap:8}},
+    React.createElement('span',{style:{fontSize:9,color:'var(--fg-dim)',textTransform:'uppercase',letterSpacing:'0.12em',fontWeight:600}},label),
+    React.createElement('div',{style:{fontFamily:'var(--mo)',fontSize:18,fontWeight:700,color:color,letterSpacing:'0.04em'}},timeLeft),
+    renderSpec&&renderSpec.summary?React.createElement('div',{style:{fontSize:9,color:'var(--fg-dim)',marginTop:4}},renderSpec.summary):null
+  );
+}`;
+
+const RC_PORTFOLIO = `function CardRenderer({data, renderSpec}) {
+  var items = Array.isArray(data) ? data : (data&&data.items ? data.items : []);
+  if (!items.length) return React.createElement('div',{style:{color:'var(--fg-dim)',textAlign:'center',padding:20,fontSize:12}},'No data');
+  var total = items.reduce(function(s,d){return s+(Number(d.value)||Number(d.allocation)||0);},0)||1;
+  var palette = ['#6366f1','#10b981','#f59e0b','#ef4444','#a855f7','#06b6d4','#ec4899'];
+  return React.createElement('div',{style:{display:'flex',flexDirection:'column',gap:8,height:'100%',justifyContent:'center',padding:'4px 2px'}},
+    ...items.map(function(item,i){
+      var pct = Math.round((Number(item.value)||Number(item.allocation)||0)/total*100);
+      var col = palette[i%palette.length];
+      var name = item.name||item.label||('Item '+(i+1));
+      return React.createElement('div',{key:i,style:{display:'flex',flexDirection:'column',gap:3}},
+        React.createElement('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'center'}},
+          React.createElement('span',{style:{fontSize:10,color:'var(--fg)',fontWeight:500}},name),
+          React.createElement('span',{style:{fontSize:10,color:col,fontWeight:700,fontFamily:'var(--mo)'}},pct+'%')
+        ),
+        React.createElement('div',{style:{height:6,background:'rgba(255,255,255,0.06)',borderRadius:3,overflow:'hidden'}},
+          React.createElement('div',{style:{height:'100%',width:pct+'%',background:col,borderRadius:3,transition:'width 0.6s ease'}})
+        )
+      );
+    }),
+    renderSpec&&renderSpec.summary?React.createElement('div',{style:{fontSize:9,color:'var(--fg-dim)',marginTop:4,textAlign:'center'}},renderSpec.summary):null
+  );
+}`;
+
+const RC_ARTICLE = `function CardRenderer({data, renderSpec}) {
+  var headline = (data&&data.headline)||(renderSpec&&renderSpec.title)||'Dashboard Card';
+  var body = (data&&data.body)||(renderSpec&&renderSpec.summary)||'No content available.';
+  return React.createElement('div',{style:{display:'flex',flexDirection:'column',gap:8,height:'100%',padding:'2px'}},
+    React.createElement('div',{style:{fontSize:13,fontWeight:600,color:'var(--fg)',lineHeight:1.3}},headline),
+    React.createElement('div',{style:{fontSize:11,color:'var(--fg-muted)',lineHeight:1.6,flex:1,overflowY:'auto'}},body)
+  );
+}`;
+
+/* ─── DEMO DATA ─── */
 const SIMULATED_RESPONSES = [
-  { keywords:['bitcoin','btc'], response:{ title:'BTC / USD — 7 Day', cardType:'chart', size:'lg', dataSource:'CoinGecko API', refreshInterval:300, data:[{name:'Mon',value:67200},{name:'Tue',value:67900},{name:'Wed',value:68420},{name:'Thu',value:68100},{name:'Fri',value:68900},{name:'Sat',value:69400},{name:'Sun',value:70150}], renderSpec:{ chartType:'line', xField:'name', yField:'value', color:'#10b981', summary:'Bitcoin broke past $70,000 this weekend with a 4.2% weekly increase.'} } },
-  { keywords:['weather','london','tokyo','paris','temperature'], response:{ title:'Global Cities Weather', cardType:'table', size:'md', dataSource:'Open-Meteo API', refreshInterval:900, data:{ headers:['City','Temp','Condition','Wind'], rows:[{City:'London',Temp:'18°C',Condition:'Light Rain 🌧️',Wind:'14 km/h'},{City:'Paris',Temp:'22°C',Condition:'Partly Cloudy ⛅',Wind:'9 km/h'},{City:'Tokyo',Temp:'26°C',Condition:'Sunny ☀️',Wind:'12 km/h'}]}, renderSpec:{ color:'#6366f1', summary:'Rainy London, fair Paris and sunny Tokyo.'} } },
-  { keywords:['news','headline','tech'], response:{ title:'Top Tech Headlines', cardType:'feed', size:'md', dataSource:'NewsAPI', refreshInterval:1800, data:[{id:1,title:'OpenRouter launches real-time model price dashboard',time:'12 min ago',url:'#'},{id:2,title:'Gemini 3.5 Flash outperforms peers in latency benchmarks',time:'1 hr ago',url:'#'},{id:3,title:'Vite 8.0 released with advanced SSR caching',time:'3 hrs ago',url:'#'},{id:4,title:'W3C adopts CSS Fluid Grids as recommended standard',time:'5 hrs ago',url:'#'}], renderSpec:{ color:'#a855f7', summary:"Developer tooling dominates today's news."} } },
-  { keywords:['checklist','workout','todo','task','fitness'], response:{ title:'Daily Fitness Tracker', cardType:'interactive', size:'sm', dataSource:'Local Memory', refreshInterval:0, data:{ widgetType:'checklist', items:[{id:'t1',text:'5km Jog (Morning)',done:true},{id:'t2',text:'Core & Abs (20 mins)',done:false},{id:'t3',text:'Hydration Goal (3L)',done:true},{id:'t4',text:'Post-workout protein',done:false}]}, renderSpec:{ color:'#a5b4fc', summary:'50% of goals accomplished.'} } },
-  { keywords:['convert','miles','km','kilometer'], response:{ title:'Unit Converter (Mi → Km)', cardType:'interactive', size:'xs', dataSource:'Math Engine', refreshInterval:0, data:{ widgetType:'converter', formula:'mi * 1.60934', fromUnit:'miles', toUnit:'km', initialValue:120}, renderSpec:{ color:'#f59e0b', summary:'120 miles ≈ 193.12 km.'} } },
-  { keywords:['countdown','timer','new year'], response:{ title:'Countdown to New Year 2027', cardType:'interactive', size:'xs', dataSource:'Local Clock', refreshInterval:1, data:{ widgetType:'timer', targetDate:'2027-01-01T00:00:00'}, renderSpec:{ color:'#ef4444', summary:'Counting down to 2027.'} } },
-  { keywords:['portfolio','allocation','eth','sol'], response:{ title:'Crypto Asset Allocation', cardType:'chart', size:'md', dataSource:'Portfolio', refreshInterval:0, data:[{name:'BTC',value:50},{name:'ETH',value:30},{name:'SOL',value:20}], renderSpec:{ chartType:'pie', xField:'name', yField:'value', color:'#6366f1', summary:'50% BTC, 30% ETH, 20% SOL allocation.'} } },
-  { keywords:['map','earthquake','geo'], response:{ title:'Global Seismic Zones', cardType:'map', size:'lg', dataSource:'USGS Feed', refreshInterval:3600, data:{ center:[20,0], zoom:2, markers:[{name:'Pacific Ring of Fire',coords:[35,139],desc:'High seismic activity'},{name:'Mid-Atlantic Ridge',coords:[-15,-25],desc:'Spreading boundary'},{name:'Alpide Belt',coords:[30,75],desc:'Collision boundary'},{name:'San Andreas Fault',coords:[36,-120],desc:'Transform fault'}]}, renderSpec:{ color:'#ef4444', summary:'Active fault lines globally.'} } },
+  { keywords:['bitcoin','btc'], response:{ title:'BTC / USD — 7 Day', size:'lg', dataSource:'CoinGecko API', refreshInterval:300,
+    data:[{name:'Mon',value:67200},{name:'Tue',value:67900},{name:'Wed',value:68420},{name:'Thu',value:68100},{name:'Fri',value:68900},{name:'Sat',value:69400},{name:'Sun',value:70150}],
+    renderSpec:{color:'#10b981',summary:'Bitcoin broke past $70,000 this weekend with a 4.2% weekly gain.'},
+    renderCode: RC_BTC } },
+  { keywords:['weather','london','tokyo','paris','temperature'], response:{ title:'Global Cities Weather', size:'md', dataSource:'Open-Meteo API', refreshInterval:900,
+    data:{headers:['City','Temp','Condition','Wind'],rows:[{City:'London',Temp:'18°C',Condition:'Light Rain 🌧️',Wind:'14 km/h'},{City:'Paris',Temp:'22°C',Condition:'Partly Cloudy ⛅',Wind:'9 km/h'},{City:'Tokyo',Temp:'26°C',Condition:'Sunny ☀️',Wind:'12 km/h'}]},
+    renderSpec:{color:'#6366f1',summary:'Rainy London, fair Paris, sunny Tokyo.'},
+    renderCode: RC_WEATHER } },
+  { keywords:['news','headline','tech'], response:{ title:'Top Tech Headlines', size:'md', dataSource:'NewsAPI', refreshInterval:1800,
+    data:[{id:1,title:'OpenRouter launches real-time model price dashboard',time:'12 min ago',url:'#'},{id:2,title:'Gemini 3.5 Flash outperforms peers in latency benchmarks',time:'1 hr ago',url:'#'},{id:3,title:'Vite 8.0 released with advanced SSR caching',time:'3 hrs ago',url:'#'},{id:4,title:'W3C adopts CSS Fluid Grids as recommended standard',time:'5 hrs ago',url:'#'}],
+    renderSpec:{color:'#a855f7',summary:"Developer tooling dominates today's headlines."},
+    renderCode: RC_NEWS } },
+  { keywords:['checklist','workout','todo','task','fitness'], response:{ title:'Daily Fitness Tracker', size:'sm', dataSource:'Local Memory', refreshInterval:0,
+    data:{widgetType:'checklist',items:[{id:'t1',text:'5km Jog (Morning)',done:true},{id:'t2',text:'Core & Abs (20 mins)',done:false},{id:'t3',text:'Hydration Goal (3L)',done:true},{id:'t4',text:'Post-workout protein',done:false}]},
+    renderSpec:{color:'#a5b4fc',summary:'50% of goals accomplished.'},
+    renderCode: RC_CHECKLIST } },
+  { keywords:['convert','miles','km','kilometer'], response:{ title:'Unit Converter (Mi → Km)', size:'xs', dataSource:'Math Engine', refreshInterval:0,
+    data:{widgetType:'converter',fromUnit:'miles',toUnit:'km',initialValue:120},
+    renderSpec:{color:'#f59e0b',summary:'120 miles ≈ 193.12 km.'},
+    renderCode: RC_CONVERTER } },
+  { keywords:['countdown','timer','new year'], response:{ title:'Countdown to New Year 2027', size:'xs', dataSource:'Local Clock', refreshInterval:1,
+    data:{widgetType:'timer',targetDate:'2027-01-01T00:00:00'},
+    renderSpec:{color:'#ef4444',summary:'Counting down to 2027.'},
+    renderCode: RC_COUNTDOWN } },
+  { keywords:['portfolio','allocation','eth','sol'], response:{ title:'Crypto Asset Allocation', size:'md', dataSource:'Portfolio', refreshInterval:0,
+    data:[{name:'BTC',value:50},{name:'ETH',value:30},{name:'SOL',value:20}],
+    renderSpec:{color:'#6366f1',summary:'50% BTC · 30% ETH · 20% SOL'},
+    renderCode: RC_PORTFOLIO } },
 ];
 
 const DEFAULT_SIMULATED = {
-  title:'AI Knowledge Digest', cardType:'article', size:'md', dataSource:'LLM Knowledge', refreshInterval:0,
-  data:{ headline:'Explore AI-Native Dashboards', body:'Agntdash parses natural language into structured visualizations. Running in Demo Mode — connect API keys in Settings to enable live pipelines, real-time data, and autonomous model selection.'},
-  renderSpec:{ color:'#6366f1', summary:'Connect an API key to enable real-time queries.'}
+  title:'AI Knowledge Digest', size:'md', dataSource:'LLM Knowledge', refreshInterval:0,
+  data:{headline:'Explore AI-Native Dashboards', body:'Agntdash parses natural language into structured visualizations. Running in Demo Mode — connect API keys in Settings to enable live pipelines, real-time data, and autonomous model selection.'},
+  renderSpec:{color:'#6366f1',summary:'Connect an API key to enable real-time queries.'},
+  renderCode: RC_ARTICLE,
 };
 
 const DEFAULT_CARDS = [
-  { id:'1', prompt:'Show me Bitcoin price this week', title:'BTC / USD — 7 Day', cardType:'chart', size:'lg', dataSource:'CoinGecko API', refreshInterval:300, group:'Finance', cols:6, rows:3, data:[], renderSpec:{ chartType:'line', xField:'name', yField:'value', color:'#10b981', summary:'Connecting to CoinGecko…'}, lastFetched:null, loading:true, error:null },
-  { id:'2', prompt:'Weather in London, Paris and Tokyo', title:'Global Cities Weather', cardType:'table', size:'md', dataSource:'Open-Meteo API', refreshInterval:900, group:'Finance', cols:6, rows:2, data:null, renderSpec:{ color:'#6366f1', summary:'Connecting to Open-Meteo…'}, lastFetched:null, loading:true, error:null },
-  { id:'3', prompt:'My daily workout checklist', title:'Daily Fitness Tracker', cardType:'interactive', size:'sm', dataSource:'Local Memory', refreshInterval:0, group:'Personal', cols:4, rows:2, data:{ widgetType:'checklist', items:[{id:'t1',text:'5km Jog (Morning)',done:true},{id:'t2',text:'Core & Abs (20 mins)',done:false},{id:'t3',text:'Hydration Goal (3L)',done:true},{id:'t4',text:'Post-workout protein',done:false}]}, renderSpec:{ color:'#a5b4fc', summary:'50% of goals accomplished.'}, lastFetched:new Date().toISOString(), loading:false, error:null },
-  { id:'4', prompt:'Countdown to New Year 2027', title:'Countdown to 2027', cardType:'interactive', size:'xs', dataSource:'Local Clock', refreshInterval:1, group:'Personal', cols:4, rows:1, data:{ widgetType:'timer', targetDate:'2027-01-01T00:00:00'}, renderSpec:{ color:'#ef4444'}, lastFetched:new Date().toISOString(), loading:false, error:null },
+  { id:'1', prompt:'Show me Bitcoin price this week', title:'BTC / USD — 7 Day', size:'lg', dataSource:'CoinGecko API', refreshInterval:300, group:'Finance', cols:6, rows:3, data:[], renderSpec:{color:'#10b981',summary:'Connecting to CoinGecko…'}, renderCode:RC_BTC, lastFetched:null, loading:true, error:null },
+  { id:'2', prompt:'Weather in London, Paris and Tokyo', title:'Global Cities Weather', size:'md', dataSource:'Open-Meteo API', refreshInterval:900, group:'Finance', cols:6, rows:2, data:null, renderSpec:{color:'#6366f1',summary:'Connecting to Open-Meteo…'}, renderCode:RC_WEATHER, lastFetched:null, loading:true, error:null },
+  { id:'3', prompt:'My daily workout checklist', title:'Daily Fitness Tracker', size:'sm', dataSource:'Local Memory', refreshInterval:0, group:'Personal', cols:4, rows:2, data:{widgetType:'checklist',items:[{id:'t1',text:'5km Jog (Morning)',done:true},{id:'t2',text:'Core & Abs (20 mins)',done:false},{id:'t3',text:'Hydration Goal (3L)',done:true},{id:'t4',text:'Post-workout protein',done:false}]}, renderSpec:{color:'#a5b4fc',summary:'50% of goals accomplished.'}, renderCode:RC_CHECKLIST, lastFetched:new Date().toISOString(), loading:false, error:null },
+  { id:'4', prompt:'Countdown to New Year 2027', title:'Countdown to 2027', size:'xs', dataSource:'Local Clock', refreshInterval:1, group:'Personal', cols:4, rows:1, data:{widgetType:'timer',targetDate:'2027-01-01T00:00:00'}, renderSpec:{color:'#ef4444'}, renderCode:RC_COUNTDOWN, lastFetched:new Date().toISOString(), loading:false, error:null },
 ];
 
 const DEFAULT_GROUPS = [
@@ -56,7 +263,6 @@ const DEFAULT_GROUPS = [
 ];
 
 /* ─── APP ─── */
-// Module-level: which keys are provided via environment variables (set at build time)
 const ENV_SOURCES = {
   activeProvider: !!import.meta.env.VITE_ACTIVE_PROVIDER,
   openRouterKey:  !!import.meta.env.VITE_OPENROUTER_KEY,
@@ -69,7 +275,6 @@ const ENV_SOURCES = {
   modelSmart:     !!import.meta.env.VITE_MODEL_SMART,
 };
 
-// Priority: env var (read-only, build-time) > localStorage (user-saved) > default
 const envOrStorage = (envVal, lsKey, def = '') =>
   envVal || localStorage.getItem(lsKey) || def;
 
@@ -89,7 +294,7 @@ export default function App() {
   const [modelFast, setModelFast] = useState(() => envOrStorage(import.meta.env.VITE_MODEL_FAST, 'agntdash_model_fast', DEFAULT_MODELS_FAST[0]));
   const [modelSmart, setModelSmart] = useState(() => envOrStorage(import.meta.env.VITE_MODEL_SMART, 'agntdash_model_smart', DEFAULT_MODELS_SMART[0]));
 
-  const [cards, setCards] = useState(() => load('agntdash_cards_v2', DEFAULT_CARDS));
+  const [cards, setCards] = useState(() => load('agntdash_cards_v3', DEFAULT_CARDS));
   const [groups, setGroups] = useState(() => load('agntdash_groups_v2', DEFAULT_GROUPS));
   const [workflowConfig, setWorkflowConfig] = useState(() => ({ ...DEFAULT_WORKFLOW_CONFIG, ...load('agntdash_workflow_config', {}) }));
 
@@ -109,7 +314,7 @@ export default function App() {
     (activeProvider === 'opencode' && openCodeKey)
   );
 
-  useEffect(() => { localStorage.setItem('agntdash_cards_v2', JSON.stringify(cards)); }, [cards]);
+  useEffect(() => { localStorage.setItem('agntdash_cards_v3', JSON.stringify(cards)); }, [cards]);
   useEffect(() => { localStorage.setItem('agntdash_groups_v2', JSON.stringify(groups)); }, [groups]);
   useEffect(() => { localStorage.setItem('agntdash_workflow_config', JSON.stringify(workflowConfig)); }, [workflowConfig]);
 
@@ -133,7 +338,7 @@ export default function App() {
     if (cards.some(c => c.id === '2' && c.loading)) fetchCard2Direct();
   }, []);
 
-  /* ─── DIRECT API FETCHERS ─── */
+  /* ─── DIRECT API FETCHERS (default cards only) ─── */
   const fetchCard1Direct = async () => {
     setCards(prev => prev.map(c => c.id==='1' ? {...c, loading:true} : c));
     try {
@@ -145,7 +350,7 @@ export default function App() {
         setCards(prev => prev.map(c => c.id==='1' ? { ...c, data: chartData, renderSpec: {...c.renderSpec, summary:`Live from CoinGecko. Current: $${chartData[chartData.length-1].value.toLocaleString()}`}, lastFetched: new Date().toISOString(), loading:false, error:null } : c));
         return;
       }
-    } catch (e) {}
+    } catch (_) {}
     setCards(prev => prev.map(c => c.id==='1' ? { ...c, data:[{name:'Mon',value:67200},{name:'Tue',value:67900},{name:'Wed',value:68420},{name:'Thu',value:68100},{name:'Fri',value:68900},{name:'Sat',value:69400},{name:'Sun',value:70150}], renderSpec:{...c.renderSpec, summary:'CoinGecko rate-limited. Showing historical data.'}, lastFetched:new Date().toISOString(), loading:false, error:null } : c));
   };
 
@@ -164,18 +369,17 @@ export default function App() {
           const cond = code >= 51 ? 'Rainy 🌧️' : code >= 1 ? 'Cloudy ⛅' : 'Sunny ☀️';
           return { City: cities[i], Temp: `${t}°C`, Condition: cond, Wind: `${w} km/h` };
         });
-        setCards(prev => prev.map(c => c.id==='2' ? { ...c, data:{ headers:['City','Temp','Condition','Wind'], rows }, renderSpec:{...c.renderSpec, summary:'Live from Open-Meteo API.'}, lastFetched:new Date().toISOString(), loading:false, error:null } : c));
+        setCards(prev => prev.map(c => c.id==='2' ? { ...c, data:{headers:['City','Temp','Condition','Wind'], rows}, renderSpec:{...c.renderSpec, summary:'Live from Open-Meteo API.'}, lastFetched:new Date().toISOString(), loading:false, error:null } : c));
         return;
       }
-    } catch (e) {}
-    setCards(prev => prev.map(c => c.id==='2' ? { ...c, data:{ headers:['City','Temp','Condition','Wind'], rows:[{City:'London',Temp:'18°C',Condition:'Light Rain 🌧️',Wind:'14 km/h'},{City:'Paris',Temp:'22°C',Condition:'Partly Cloudy ⛅',Wind:'9 km/h'},{City:'Tokyo',Temp:'26°C',Condition:'Sunny ☀️',Wind:'12 km/h'}]}, renderSpec:{...c.renderSpec, summary:'Open-Meteo unavailable. Showing typical conditions.'}, lastFetched:new Date().toISOString(), loading:false, error:null } : c));
+    } catch (_) {}
+    setCards(prev => prev.map(c => c.id==='2' ? { ...c, data:{headers:['City','Temp','Condition','Wind'], rows:[{City:'London',Temp:'18°C',Condition:'Light Rain 🌧️',Wind:'14 km/h'},{City:'Paris',Temp:'22°C',Condition:'Partly Cloudy ⛅',Wind:'9 km/h'},{City:'Tokyo',Temp:'26°C',Condition:'Sunny ☀️',Wind:'12 km/h'}]}, renderSpec:{...c.renderSpec, summary:'Open-Meteo unavailable. Showing typical conditions.'}, lastFetched:new Date().toISOString(), loading:false, error:null } : c));
   };
 
   /* ─── SAVE SETTINGS ─── */
   const saveSettings = ({ activeProvider: ap, openRouterKey: or, openAIKey: oai, openAIBaseUrl: oaib, openCodeKey: oc, openCodeBaseUrl: ocb, tavilyKey: tv, modelFast: mf, modelSmart: ms }) => {
     setActiveProvider(ap); setOpenRouterKey(or); setOpenAIKey(oai); setOpenAIBaseUrl(oaib);
     setOpenCodeKey(oc); setOpenCodeBaseUrl(ocb); setTavilyKey(tv); setModelFast(mf); setModelSmart(ms);
-    // Only persist to localStorage what isn't already locked by an env var
     if (!ENV_SOURCES.activeProvider)  localStorage.setItem('agntdash_active_provider', ap);
     if (!ENV_SOURCES.openRouterKey)   localStorage.setItem('agntdash_or_key', or);
     if (!ENV_SOURCES.openAIKey)       localStorage.setItem('agntdash_openai_key', oai);
@@ -188,52 +392,84 @@ export default function App() {
     setIsSettingsOpen(false);
   };
 
-  /* ─── AGENT PIPELINE ─── */
+  /* ─── AGENT PIPELINE (single-stage: no classifier) ─── */
   const runAgentPipeline = async (promptText, existingCardId = null) => {
     const key = activeProvider==='openrouter' ? openRouterKey : activeProvider==='openai' ? openAIKey : openCodeKey;
     const base = activeProvider==='openrouter' ? 'https://openrouter.ai/api/v1' : activeProvider==='openai' ? openAIBaseUrl : openCodeBaseUrl;
-    const getGroupName = () => existingCardId ? (cards.find(c=>c.id===existingCardId)?.group || 'Personal') : 'Personal';
+    const getGroup = () => existingCardId ? (cards.find(c=>c.id===existingCardId)?.group || 'Personal') : 'Personal';
     const sizeToGrid = size => size==='xs'?{cols:3,rows:1}:size==='sm'?{cols:4,rows:2}:size==='md'?{cols:6,rows:2}:size==='lg'?{cols:6,rows:3}:{cols:12,rows:3};
 
+    // Demo mode: use pre-built render code
     if (!key) {
       await new Promise(r => setTimeout(r, 1200));
       const norm = promptText.toLowerCase();
       const match = SIMULATED_RESPONSES.find(r => r.keywords.some(k => norm.includes(k)));
       const payload = match ? JSON.parse(JSON.stringify(match.response)) : JSON.parse(JSON.stringify(DEFAULT_SIMULATED));
-      const { cols, rows } = sizeToGrid(payload.size);
-      return { id: existingCardId || Math.random().toString(36).slice(2,9), prompt: promptText, ...payload, group: getGroupName(), cols, rows, lastFetched: new Date().toISOString(), loading: false, error: null };
+      const { cols, rows } = sizeToGrid(payload.size || 'md');
+      return { id: existingCardId || Math.random().toString(36).slice(2,9), prompt: promptText, ...payload, group: getGroup(), cols, rows, lastFetched: new Date().toISOString(), loading: false, error: null };
     }
 
     try {
-      let classification = { cardType:'article', size:'md', dataSource:'AI Knowledge', searchRequired:false };
-      try {
-        const classRes = await fetch(`${base}/chat/completions`, {
-          method:'POST', headers:{ 'Content-Type':'application/json', 'Authorization':`Bearer ${key}` },
-          body: JSON.stringify({ model: modelFast, messages:[{ role:'system', content:'Classify dashboard card. Return JSON only: {"cardType":"chart|stat|article|table|map|interactive|feed|media|custom","size":"xs|sm|md|lg|xl","dataSource":"string","searchRequired":true|false}. Use "custom" when the visualization needs unique rendering that none of the standard types support well — e.g. word clouds, network graphs, Gantt charts, heatmaps, radial gauges, or highly bespoke layouts.' },{ role:'user', content:`Prompt: "${promptText}"` }], temperature: workflowConfig.classifierTemp, response_format:{ type:'json_object' } })
-        });
-        if (classRes.ok) { const cj = await classRes.json(); const ct = cj.choices?.[0]?.message?.content?.trim(); if (ct) { const p = JSON.parse(ct.replace(/^```json\s*/i,'').replace(/```$/,'')); if (p.cardType) classification = p; } }
-      } catch (e) { console.warn('Classifier failed:', e); }
-
+      // Optional Tavily web search
       let searchContext = '';
-      if (tavilyKey && (classification.searchRequired || workflowConfig.prioritizeSearch)) {
+      if (tavilyKey) {
         try {
-          const tr = await fetch('https://api.tavily.com/search', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ api_key: tavilyKey, query: promptText, search_depth: workflowConfig.tavilyDepth||'basic', max_results:3 }) });
-          if (tr.ok) { const tj = await tr.json(); if (tj.results) searchContext = tj.results.map(r=>`Title: ${r.title}\nSource: ${r.url}\nContent: ${r.content}`).join('\n\n'); }
-        } catch (e) { console.warn('Tavily failed:', e); }
+          const tr = await fetch('https://api.tavily.com/search', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ api_key: tavilyKey, query: promptText, search_depth: workflowConfig.tavilyDepth||'basic', max_results:4 }) });
+          if (tr.ok) { const tj = await tr.json(); if (tj.results) searchContext = tj.results.map(r=>`Title: ${r.title}\nURL: ${r.url}\nContent: ${r.content}`).join('\n\n'); }
+        } catch (e) { console.warn('Tavily search failed:', e); }
       }
 
-      const isCustom = classification.cardType === 'custom';
-      const sysPrompt = isCustom
-        ? `You are a dashboard card planner that writes custom React rendering code. Return ONLY valid JSON with this exact schema: {"title":"string","cardType":"custom","size":"${classification.size}","dataSource":"string","refreshInterval":0,"data":{},"renderSpec":{"color":"#hex","summary":"string"},"renderCode":"<JS function body>"}. The "renderCode" field must be the body of a JavaScript function with signature (React, data, renderSpec) that returns a React element tree using React.createElement() — no JSX. Available CSS variables: var(--fg), var(--fg-muted), var(--fg-dim), var(--primary), var(--success), var(--danger), var(--warning), var(--border), var(--bg). The "data" field should contain structured data appropriate for the visualization. Make it visually rich, informative, and appropriate to the user's request. Keep renderCode under 60 lines.`
-        : `You are a dashboard card planner. Return ONLY valid JSON with this schema: {"title":"string","cardType":"${classification.cardType}","size":"${classification.size}","dataSource":"string","refreshInterval":0,"data":{},"renderSpec":{"chartType":"line|bar|area|pie","xField":"string","yField":"string","color":"#hex","summary":"string"}}. Include rich structured data arrays. Be concise.`;
+      const sysPrompt = `You are a dashboard card code generator. Return ONLY valid JSON:
+{"title":"string","size":"xs|sm|md|lg|xl","dataSource":"string","refreshInterval":0,"data":{},"renderSpec":{"color":"#hex","summary":"string"},"renderCode":"function CardRenderer({data,renderSpec}){...}"}
 
-      const userMsg = searchContext ? `Prompt: ${promptText}\n\nSearch context:\n${searchContext}` : `Prompt: ${promptText}`;
-      const planRes = await fetch(`${base}/chat/completions`, { method:'POST', headers:{'Content-Type':'application/json','Authorization':`Bearer ${key}`}, body: JSON.stringify({ model: modelSmart, messages:[{role:'system',content:sysPrompt},{role:'user',content:userMsg}], temperature: workflowConfig.plannerTemp, response_format:{type:'json_object'} }) });
-      if (!planRes.ok) throw new Error(`API error: ${planRes.statusText}`);
-      const raw = await planRes.json();
+renderCode MUST be a JavaScript function named CardRenderer that:
+- Takes {data, renderSpec} as destructured props
+- Uses ONLY React.createElement() calls — absolutely no JSX
+- May use React.useState() and React.useEffect() for interactivity
+- Handles null/empty/missing data gracefully with a fallback message
+- Is styled inline; available CSS vars: var(--fg) var(--fg-muted) var(--fg-dim) var(--primary) var(--success) var(--danger) var(--warning) var(--border) var(--fn) var(--mo)
+- Returns one root React element
+
+Visualization guidance:
+- Time-series/trends: SVG polylines with gradient area fill, axis labels, current value header
+- Tables/comparisons: <table> with alternating row shading, colored key column
+- News/feeds: scrollable list items with colored left-border accent, title + metadata
+- Checklists/todos: React.useState for toggles, progress bar, strikethrough on done items
+- Converters/inputs: React.useState for controlled <input>, live result display
+- Countdown timers: React.useEffect with setInterval, formatted d/h/m/s display
+- Allocations/portfolios: horizontal bars with labels and percentages, color-coded per item
+- Charts: SVG with computed coordinates from data array
+
+Put all data needed for rendering in the "data" field. Make cards visually rich and information-dense.`;
+
+      const userMsg = searchContext
+        ? `User request: ${promptText}\n\nLive search results:\n${searchContext}`
+        : `User request: ${promptText}`;
+
+      const res = await fetch(`${base}/chat/completions`, {
+        method: 'POST',
+        headers: { 'Content-Type':'application/json', 'Authorization':`Bearer ${key}` },
+        body: JSON.stringify({ model: modelSmart, messages:[{role:'system',content:sysPrompt},{role:'user',content:userMsg}], temperature: workflowConfig.plannerTemp || 0.3, response_format:{type:'json_object'} })
+      });
+      if (!res.ok) throw new Error(`API error: ${res.statusText}`);
+      const raw = await res.json();
       const payload = JSON.parse(raw.choices[0].message.content.trim().replace(/^```json\s*/i,'').replace(/```$/,''));
-      const { cols, rows } = sizeToGrid(payload.size || classification.size);
-      return { id: existingCardId || Math.random().toString(36).slice(2,9), prompt: promptText, title: payload.title||'AI Card', cardType: payload.cardType||classification.cardType, size: payload.size||classification.size, dataSource: searchContext ? 'Tavily Web Search' : (payload.dataSource||'AI Knowledge'), refreshInterval: payload.refreshInterval||0, group: getGroupName(), cols, rows, data: payload.data, renderSpec: payload.renderSpec||{}, renderCode: payload.renderCode||null, lastFetched: new Date().toISOString(), loading:false, error:null };
+      const { cols, rows } = sizeToGrid(payload.size || 'md');
+      return {
+        id: existingCardId || Math.random().toString(36).slice(2,9),
+        prompt: promptText,
+        title: payload.title || 'AI Card',
+        size: payload.size || 'md',
+        dataSource: searchContext ? 'Tavily Web Search' : (payload.dataSource || 'AI Knowledge'),
+        refreshInterval: payload.refreshInterval || 0,
+        group: getGroup(),
+        cols, rows,
+        data: payload.data,
+        renderSpec: payload.renderSpec || {},
+        renderCode: payload.renderCode || null,
+        lastFetched: new Date().toISOString(),
+        loading: false, error: null,
+      };
     } catch (err) { console.error('Pipeline error:', err); throw err; }
   };
 
@@ -242,7 +478,7 @@ export default function App() {
     if (!promptText.trim()) { handleAddNewCardPlaceholder(groups[0]?.name || 'Personal'); return; }
     setIsConsoleSubmitting(true);
     const tempId = Math.random().toString(36).slice(2,9);
-    setCards(prev => [...prev, { id:tempId, prompt:promptText, title:'Analyzing Intent…', cardType:'article', size:'md', cols:6, rows:2, group:'Personal', loading:true, error:null }]);
+    setCards(prev => [...prev, { id:tempId, prompt:promptText, title:'Analyzing Intent…', size:'md', cols:6, rows:2, group:'Personal', loading:true, error:null }]);
     if (workflowConfig.clearOnSubmit) setConsolePrompt('');
     try {
       const card = await runAgentPipeline(promptText);
@@ -269,34 +505,7 @@ export default function App() {
   const handleRefreshAll = () => cards.forEach(c => handleRefreshCard(c.id));
   const handleDeleteCard = id => setCards(prev => prev.filter(c => c.id !== id));
 
-  const handleOverrideCardType = (cardId, newType) => {
-    setCards(prev => prev.map(c => {
-      if (c.id !== cardId) return c;
-      if (!workflowConfig.autoResizeOnOverride) return { ...c, cardType: newType };
-      const sizeMap = { stat:{cols:3,rows:1,size:'xs'}, chart:{cols:6,rows:2,size:'md'}, table:{cols:6,rows:3,size:'lg'}, article:{cols:6,rows:2,size:'md'}, map:{cols:6,rows:3,size:'lg'}, media:{cols:4,rows:2,size:'sm'}, feed:{cols:6,rows:2,size:'md'}, interactive:{cols:4,rows:2,size:'sm'}, custom:{cols:6,rows:3,size:'lg'} };
-      const dim = sizeMap[newType] || {};
-      return { ...c, cardType: newType, ...(dim.cols && { cols:dim.cols, rows:dim.rows, size:dim.size }) };
-    }));
-  };
-
   const handleMoveCardGroup = (cardId, group) => setCards(prev => prev.map(c => c.id===cardId ? {...c, group} : c));
-
-  const handleChecklistToggle = (cardId, itemId) => {
-    setCards(prev => prev.map(c => {
-      if (c.id!==cardId || c.data?.widgetType!=='checklist') return c;
-      const items = c.data.items.map(i => i.id===itemId ? {...i, done:!i.done} : i);
-      const done = items.filter(i=>i.done).length;
-      return { ...c, data:{...c.data, items}, renderSpec:{...c.renderSpec, summary:`${Math.round(done/items.length*100)}% of goals accomplished.`} };
-    }));
-  };
-
-  const handleConverterChange = (cardId, val) => {
-    setCards(prev => prev.map(c => {
-      if (c.id!==cardId || c.data?.widgetType!=='converter') return c;
-      const f = parseFloat(val) || 0;
-      return { ...c, data:{...c.data, initialValue:f}, renderSpec:{...c.renderSpec, summary:`${f} miles ≈ ${(f*1.60934).toFixed(2)} km.`} };
-    }));
-  };
 
   const handleStartEditingPrompt = card => { setEditingCardId(card.id); setEditPromptValue(card.prompt); };
 
@@ -314,7 +523,7 @@ export default function App() {
 
   const handleAddNewCardPlaceholder = groupName => {
     const id = Math.random().toString(36).slice(2,9);
-    setCards(prev => [...prev, { id, prompt:'', title:'New Card', cardType:'article', size:'md', cols:6, rows:2, group:groupName, isCreating:true, loading:false, error:null, data:null, renderSpec:{} }]);
+    setCards(prev => [...prev, { id, prompt:'', title:'New Card', size:'md', cols:6, rows:2, group:groupName, isCreating:true, loading:false, error:null, data:null, renderSpec:{} }]);
   };
 
   const handleGenerateInlineCard = async (cardId, promptText) => {
@@ -368,10 +577,7 @@ export default function App() {
   const handlers = {
     onRefresh: handleRefreshCard,
     onDelete: handleDeleteCard,
-    onOverride: handleOverrideCardType,
     onMove: handleMoveCardGroup,
-    onChecklistToggle: handleChecklistToggle,
-    onConverterChange: handleConverterChange,
     onStartEdit: handleStartEditingPrompt,
     onSaveEdit: handleSavePromptEdit,
     onCancelEdit: () => setEditingCardId(null),

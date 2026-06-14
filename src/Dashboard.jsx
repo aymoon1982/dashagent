@@ -1,7 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { CardBody, InlineCardCreator, getCompatibleFormats } from './Cards.jsx';
-
-const FMT_ICONS = { chart:'bar_chart', stat:'speed', article:'article', table:'table_chart', map:'map', interactive:'touch_app', feed:'rss_feed', media:'image', custom:'code_blocks' };
+import { CardBody, InlineCardCreator } from './Cards.jsx';
 
 /* ─── PROMPT CONSOLE ─── */
 function PromptConsole({ consolePrompt, setConsolePrompt, onAddCard, isSubmitting, workflowConfig, samplePrompts }) {
@@ -55,7 +53,6 @@ function CardWrapper({ card, group, groups, handlers, isEditing, editPromptValue
     return () => document.removeEventListener('mousedown', close);
   }, [menuOpen]);
 
-  const fmts = getCompatibleFormats(card);
   const color = group?.color || '#6366f1';
   const accent = card.renderSpec?.color || color;
   const accentBg = accent + '22';
@@ -78,7 +75,7 @@ function CardWrapper({ card, group, groups, handlers, isEditing, editPromptValue
           <div className="card-hd">
             <div className="card-type-ico" style={{ background: accentBg }}>
               <span className="material-symbols-outlined" style={{ color: accent }}>
-                {card.isCreating ? 'edit_note' : (FMT_ICONS[card.cardType] || 'dashboard')}
+                {card.isCreating ? 'edit_note' : (card.renderCode ? 'code_blocks' : 'dashboard')}
               </span>
             </div>
             <div className="card-meta">
@@ -91,18 +88,9 @@ function CardWrapper({ card, group, groups, handlers, isEditing, editPromptValue
             </div>
 
             {!card.isCreating && !card.loading && !card.error && (
-              <>
-                <select className="group-sel" value={card.group} onChange={e => handlers.onMove(card.id, e.target.value)} title="Move to group">
-                  {groups.map(g => <option key={g.name} value={g.name}>📁 {g.name}</option>)}
-                </select>
-                <div className="fmt-sw">
-                  {fmts.map(fmt => (
-                    <button key={fmt} className={`fmt-btn${card.cardType === fmt ? ' active' : ''}`} title={`View as ${fmt}`} onClick={() => handlers.onOverride(card.id, fmt)}>
-                      <span className="material-symbols-outlined">{FMT_ICONS[fmt] || 'dashboard'}</span>
-                    </button>
-                  ))}
-                </div>
-              </>
+              <select className="group-sel" value={card.group} onChange={e => handlers.onMove(card.id, e.target.value)} title="Move to group">
+                {groups.map(g => <option key={g.name} value={g.name}>📁 {g.name}</option>)}
+              </select>
             )}
 
             {!card.isCreating && (
@@ -131,7 +119,7 @@ function CardWrapper({ card, group, groups, handlers, isEditing, editPromptValue
           <div className="card-bd">
             {card.isCreating
               ? <InlineCardCreator card={card} onGenerate={handlers.onGenerate} onCancel={handlers.onCancel} />
-              : <CardBody card={card} handlers={handlers} />
+              : <CardBody card={card} />
             }
           </div>
 
@@ -140,7 +128,7 @@ function CardWrapper({ card, group, groups, handlers, isEditing, editPromptValue
               <span className="material-symbols-outlined" style={{ fontSize:11, color:'var(--fg-dim)', flexShrink:0 }}>edit</span>
               <span className="prompt-echo" title={card.prompt}>"{card.prompt}"</span>
               <div className="card-badges">
-                <span className="badge">{card.cardType}</span>
+                {card.renderCode && <span className="badge">ai</span>}
                 <span className="badge">{card.size}</span>
                 {card.refreshInterval > 0 && <span className="badge live">live</span>}
               </div>
@@ -186,7 +174,7 @@ function CardWrapper({ card, group, groups, handlers, isEditing, editPromptValue
 
             <div className="cfb-footer">
               <div className="card-badges">
-                <span className="badge">{card.cardType}</span>
+                {card.renderCode && <span className="badge">ai</span>}
                 <span className="badge">{card.size}</span>
                 {card.refreshInterval > 0 && <span className="badge live">live</span>}
               </div>
