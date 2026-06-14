@@ -276,6 +276,8 @@ function GroupSection({ group, cards, groups, handlers, editingCardId, editPromp
 
 /* ─── DASHBOARD VIEW ─── */
 export function DashboardView({ cards, groups, setGroups, isApiConnected, workflowConfig, consolePrompt, setConsolePrompt, isConsoleSubmitting, onAddCard, editingCardId, editPromptValue, setEditPromptValue, draggingCardId, handlers, samplePrompts }) {
+  const totalCards = cards.length;
+
   return (
     <div>
       <PromptConsole
@@ -289,15 +291,19 @@ export function DashboardView({ cards, groups, setGroups, isApiConnected, workfl
 
       <div className="main-content fade-in">
         {!isApiConnected && (
-          <div className="demo-banner">
-            <span className="material-symbols-outlined">info</span>
-            <div>
-              <div className="demo-banner-title">Demo Mode — No API Key Configured</div>
-              <div className="demo-banner-desc">Open Settings to connect OpenRouter, OpenAI, or OpenCode Go for live AI-powered card generation.</div>
+          <div className="onboarding-cta">
+            <div className="onboarding-icon">
+              <span className="material-symbols-outlined">auto_awesome</span>
             </div>
-            <button className="btn btn-secondary btn-sm" onClick={handlers.onOpenSettings} style={{ flexShrink:0 }}>
+            <div className="onboarding-body">
+              <div className="onboarding-title">Connect an AI Provider to Get Started</div>
+              <div className="onboarding-desc">
+                Agntdash uses a 3-stage pipeline: an intent analyzer decides if live search is needed, Tavily fetches real data, then a smart model writes a custom React component for each card. No simulated responses — every card is generated live.
+              </div>
+            </div>
+            <button className="btn btn-primary" onClick={handlers.onOpenSettings} style={{ flexShrink:0 }}>
               <span className="material-symbols-outlined">settings</span>
-              <span className="prompt-btn-label"> Setup</span>
+              <span className="prompt-btn-label"> Open Settings</span>
             </button>
           </div>
         )}
@@ -317,6 +323,14 @@ export function DashboardView({ cards, groups, setGroups, isApiConnected, workfl
             workflowConfig={workflowConfig}
           />
         ))}
+
+        {isApiConnected && totalCards === 0 && (
+          <div className="empty-dashboard">
+            <span className="material-symbols-outlined" style={{ fontSize:40, color:'var(--fg-dim)', marginBottom:12 }}>dashboard_customize</span>
+            <div style={{ fontSize:14, fontWeight:600, color:'var(--fg-muted)', marginBottom:6 }}>Your dashboard is empty</div>
+            <div style={{ fontSize:12, color:'var(--fg-dim)' }}>Type a prompt above to generate your first card</div>
+          </div>
+        )}
 
         <div className="add-group-row">
           <button className="btn btn-secondary" onClick={handlers.onAddGroup}>

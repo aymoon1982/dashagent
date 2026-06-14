@@ -30,7 +30,7 @@ export function AppHeader({ activeView, setActiveView, isApiConnected, onOpenSet
       <div className="header-right">
         <div className={`status-pill ${isApiConnected ? 'live' : 'demo'}`}>
           <div className={`s-dot ${isApiConnected ? 'pulse' : ''}`}></div>
-          {isApiConnected ? 'Connected' : 'Demo Mode'}
+          {isApiConnected ? 'Connected' : 'No API Key'}
         </div>
         <button className="icon-btn" onClick={onRefreshAll} title="Refresh all cards">
           <span className="material-symbols-outlined">refresh</span>
@@ -67,7 +67,6 @@ export function SettingsDrawer({ isOpen, onClose, activeProvider, openRouterKey,
     }
   }, [isOpen]);
 
-  // Derive whether the active provider's key is missing
   const activeKeyMissing = (() => {
     if (localProvider === 'openrouter') return !localORKey;
     if (localProvider === 'openai')     return !localOAIKey;
@@ -86,7 +85,6 @@ export function SettingsDrawer({ isOpen, onClose, activeProvider, openRouterKey,
     modelSmart: 'VITE_MODEL_SMART',
   };
 
-  // Render an input that is read-only when backed by an env var
   const EnvInput = ({ type = 'text', envKey, value, onChange, placeholder }) => {
     const locked = !!envSources[envKey];
     return (
@@ -148,7 +146,6 @@ export function SettingsDrawer({ isOpen, onClose, activeProvider, openRouterKey,
         </div>
 
         <div className="settings-bd">
-          {/* Missing key banner — shown when no LLM key is configured for active provider */}
           {activeKeyMissing && (
             <div className="settings-missing-key">
               <span className="material-symbols-outlined" style={{ fontSize:18, flexShrink:0 }}>key_off</span>
@@ -157,7 +154,7 @@ export function SettingsDrawer({ isOpen, onClose, activeProvider, openRouterKey,
                 <div className="smk-desc">
                   Add{' '}
                   <code>{localProvider === 'openrouter' ? 'VITE_OPENROUTER_KEY' : localProvider === 'openai' ? 'VITE_OPENAI_KEY' : 'VITE_OPENCODE_KEY'}</code>
-                  {' '}to your <code>.env.local</code> file, or enter the key below to use live AI generation. Without a key, the dashboard runs in Demo Mode with simulated responses.
+                  {' '}to your <code>.env.local</code> file, or enter the key below to enable live AI card generation.
                 </div>
               </div>
             </div>
@@ -221,7 +218,7 @@ export function SettingsDrawer({ isOpen, onClose, activeProvider, openRouterKey,
             </div>
             <div className="models-grid">
               <div className="form-g">
-                <label className="form-lbl">Fast Model (unused)</label>
+                <label className="form-lbl">Intent Analyzer (Fast)</label>
                 {envSources.modelFast
                   ? <div className="env-input-wrap"><input className="form-in env-locked" value={localFast} readOnly /><span className="env-badge"><span className="material-symbols-outlined" style={{fontSize:10}}>lock</span>ENV</span></div>
                   : <select className="form-sel" value={localFast} onChange={e => setLocalFast(e.target.value)}>
@@ -230,7 +227,7 @@ export function SettingsDrawer({ isOpen, onClose, activeProvider, openRouterKey,
                     </select>}
               </div>
               <div className="form-g">
-                <label className="form-lbl">Planner (Smart)</label>
+                <label className="form-lbl">Code Generator (Smart)</label>
                 {envSources.modelSmart
                   ? <div className="env-input-wrap"><input className="form-in env-locked" value={localSmart} readOnly /><span className="env-badge"><span className="material-symbols-outlined" style={{fontSize:10}}>lock</span>ENV</span></div>
                   : <select className="form-sel" value={localSmart} onChange={e => setLocalSmart(e.target.value)}>
@@ -264,22 +261,25 @@ export function SettingsDrawer({ isOpen, onClose, activeProvider, openRouterKey,
 
 /* ─── PIPELINE VIEW ─── */
 const STAGES = [
-  { id:0, icon:'edit_note', label:'Prompt Input', sub:'Natural language intent', color:'#6366f1' },
-  { id:1, icon:'travel_explore', label:'Web Search', sub:'Tavily live data (optional)', color:'#10b981' },
-  { id:2, icon:'code_blocks', label:'Code Generator', sub:'LLM writes renderCode', color:'#a855f7' },
-  { id:3, icon:'grid_view', label:'CSS Grid', sub:'Dense auto-placement', color:'#f59e0b' },
+  { id:0, icon:'edit_note',      label:'Prompt Input',      sub:'Natural language intent',                color:'#6366f1' },
+  { id:1, icon:'psychology',     label:'Intent Analyzer',   sub:'Fast model — needs live search?',        color:'#a855f7' },
+  { id:2, icon:'travel_explore', label:'Web Search',        sub:'Tavily fetches live data (if needed)',   color:'#10b981' },
+  { id:3, icon:'code_blocks',    label:'Code Generator',    sub:'Smart model — verify data + renderCode', color:'#f59e0b' },
+  { id:4, icon:'grid_view',      label:'CSS Grid',          sub:'Dense auto-placement layout',            color:'#6366f1' },
 ];
 
-export function PipelineView({ workflowConfig, setWorkflowConfig, modelFast, modelSmart, activeProvider, isApiConnected, hasTavily }) {
+export function PipelineView({ workflowConfig, setWorkflowConfig, modelFast, modelSmart, activeProvider, isApiConnected, hasTavily, fixedSystemPrompt }) {
   const [sel, setSel] = useState(0);
+  const [sysExpanded, setSysExpanded] = useState(false);
   const cfg = workflowConfig;
   const set = (k, v) => setWorkflowConfig(prev => ({ ...prev, [k]: v }));
   const stage = STAGES[sel];
 
   const stageActive = id => {
-    if (id === 0 || id === 3) return true;
-    if (id === 1) return hasTavily;
-    if (id === 2) return isApiConnected;
+    if (id === 0 || id === 4) return true;
+    if (id === 1) return isApiConnected;
+    if (id === 2) return hasTavily;
+    if (id === 3) return isApiConnected;
     return false;
   };
 
@@ -295,15 +295,21 @@ export function PipelineView({ workflowConfig, setWorkflowConfig, modelFast, mod
             <span className="cfg-lbl">Show preset suggestion chips</span>
             <button className={`toggle ${cfg.enableAutocomplete?'on':'off'}`} onClick={() => set('enableAutocomplete', !cfg.enableAutocomplete)}>{cfg.enableAutocomplete?'✓ Enabled':'Disabled'}</button>
           </div>
-          <div className="cfg-io"><strong>Output:</strong> Prompt text → Stage 2 Web Search (if Tavily key set) → Stage 3 Code Generator</div>
+          <div className="cfg-io"><strong>Output:</strong> Prompt text → Stage 2 Intent Analyzer</div>
         </>
       );
       case 1: return (
         <>
           <div className="cfg-row">
-            <span className="cfg-lbl">Force web search on all prompts</span>
-            <button className={`toggle ${cfg.prioritizeSearch?'on':'off'}`} onClick={() => set('prioritizeSearch', !cfg.prioritizeSearch)}>{cfg.prioritizeSearch?'✓ Enabled':'Disabled'}</button>
+            <span className="cfg-lbl">Intent analyzer model</span>
+            <span className="model-tag" title={modelFast}>{modelFast}</span>
           </div>
+          <div className="cfg-io"><strong>How it works:</strong> The fast model reads the prompt and returns <code>{'{needs_search, search_query}'}</code>. If the API call fails, a keyword regex fallback activates (news, price, weather, today, latest…).</div>
+          <div className="cfg-io"><strong>Status:</strong> {isApiConnected ? `✓ Active — using ${modelFast}` : '✗ No API key — stage inactive, keyword fallback always used'}</div>
+        </>
+      );
+      case 2: return (
+        <>
           <div className="cfg-row">
             <span className="cfg-lbl">Tavily search depth</span>
             <select className="cfg-select" value={cfg.tavilyDepth} onChange={e => set('tavilyDepth', e.target.value)}>
@@ -311,23 +317,24 @@ export function PipelineView({ workflowConfig, setWorkflowConfig, modelFast, mod
               <option value="advanced">Advanced</option>
             </select>
           </div>
-          <div className="cfg-io"><strong>Status:</strong> Tavily key {hasTavily ? '✓ Connected — search results injected into LLM context' : '✗ Not configured — LLM uses its own knowledge'}</div>
+          <div className="cfg-io"><strong>Status:</strong> Tavily key {hasTavily ? '✓ Configured — search results injected as primary data into the LLM context' : '✗ Not configured — Stage 3 uses LLM knowledge only'}</div>
+          <div className="cfg-io"><strong>Trigger:</strong> Only called when Stage 2 returns <code>needs_search: true</code> — calculators, timers, and converters skip this stage entirely.</div>
         </>
       );
-      case 2: return (
+      case 3: return (
         <>
           <div className="cfg-row">
             <span className="cfg-lbl">Code generator model</span>
             <span className="model-tag" title={modelSmart}>{modelSmart}</span>
           </div>
           <div className="cfg-row">
-            <span className="cfg-lbl">Temperature <strong style={{ color:'var(--fg)' }}>{cfg.plannerTemp.toFixed(2)}</strong></span>
-            <input type="range" className="range" min="0" max="1" step="0.05" value={cfg.plannerTemp} onChange={e => set('plannerTemp', parseFloat(e.target.value))} />
+            <span className="cfg-lbl">Temperature <strong style={{ color:'var(--fg)' }}>{(cfg.plannerTemp||0.3).toFixed(2)}</strong></span>
+            <input type="range" className="range" min="0" max="1" step="0.05" value={cfg.plannerTemp||0.3} onChange={e => set('plannerTemp', parseFloat(e.target.value))} />
           </div>
-          <div className="cfg-io"><strong>Output:</strong> JSON with title · size · data · renderSpec · renderCode (React.createElement function) → Stage 4</div>
+          <div className="cfg-io"><strong>Output:</strong> JSON with title · size · data · renderSpec · renderCode (validated React.createElement function) → Stage 5</div>
         </>
       );
-      case 3: return (
+      case 4: return (
         <>
           <div className="cfg-row">
             <span className="cfg-lbl">Dense grid packing</span>
@@ -335,15 +342,15 @@ export function PipelineView({ workflowConfig, setWorkflowConfig, modelFast, mod
           </div>
           <div className="cfg-row">
             <span className="cfg-lbl">Default sort order</span>
-            <select className="cfg-select" value={cfg.defaultSortOrder} onChange={e => set('defaultSortOrder', e.target.value)}>
+            <select className="cfg-select" value={cfg.defaultSortOrder||'none'} onChange={e => set('defaultSortOrder', e.target.value)}>
               <option value="none">None (manual)</option>
               <option value="size-desc">Largest first</option>
               <option value="size-asc">Smallest first</option>
             </select>
           </div>
           <div className="cfg-row">
-            <span className="cfg-lbl">Grid snap unit <strong style={{ color:'var(--fg)' }}>{cfg.gridSnapUnit}px</strong></span>
-            <input type="range" className="range" min="4" max="32" step="4" value={cfg.gridSnapUnit} onChange={e => set('gridSnapUnit', parseInt(e.target.value))} />
+            <span className="cfg-lbl">Grid snap unit <strong style={{ color:'var(--fg)' }}>{cfg.gridSnapUnit||8}px</strong></span>
+            <input type="range" className="range" min="4" max="32" step="4" value={cfg.gridSnapUnit||8} onChange={e => set('gridSnapUnit', parseInt(e.target.value))} />
           </div>
           <div className="cfg-io"><strong>Layout:</strong> 12-column CSS grid, <code>grid-auto-flow: dense</code> fills gaps automatically when cards vary in size</div>
         </>
@@ -359,7 +366,7 @@ export function PipelineView({ workflowConfig, setWorkflowConfig, modelFast, mod
           <span className="material-symbols-outlined" style={{ fontSize:22 }}>account_tree</span>
           Agent Pipeline Workflow
         </h2>
-        <p>Each card runs its own isolated multi-agent pipeline. Click a stage to configure it. Changes take effect on the next card generation.</p>
+        <p>Each card runs its own isolated multi-stage pipeline. Click a stage to configure it. Changes take effect on the next card generation.</p>
       </div>
 
       <div className="pipeline-diagram-scroll">
@@ -405,6 +412,63 @@ export function PipelineView({ workflowConfig, setWorkflowConfig, modelFast, mod
           </div>
         </div>
         <div className="pipe-config-bd">{renderConfig()}</div>
+      </div>
+
+      {/* ── SYSTEM PROMPT EDITOR ── */}
+      <div className="pipe-config" style={{ marginTop:12 }}>
+        <div
+          className="pipe-config-hd"
+          onClick={() => setSysExpanded(v => !v)}
+          style={{ cursor:'pointer', userSelect:'none' }}
+        >
+          <div style={{ width:36, height:36, borderRadius:10, display:'flex', alignItems:'center', justifyContent:'center', background:'rgba(99,102,241,0.12)', border:'1px solid rgba(99,102,241,0.3)' }}>
+            <span className="material-symbols-outlined" style={{ fontSize:20, color:'var(--primary)' }}>prompt_suggestion</span>
+          </div>
+          <div>
+            <h3>System Prompt</h3>
+            <p>Fixed contract (read-only) + your custom instructions (editable)</p>
+          </div>
+          <div style={{ marginLeft:'auto' }}>
+            <span className="material-symbols-outlined" style={{ color:'var(--fg-dim)', transition:'transform 0.2s', display:'block', transform: sysExpanded ? 'rotate(180deg)' : 'none' }}>keyboard_arrow_down</span>
+          </div>
+        </div>
+
+        {sysExpanded && (
+          <div className="pipe-config-bd" style={{ display:'flex', flexDirection:'column', gap:14 }}>
+            <div>
+              <div style={{ fontSize:10, fontWeight:700, color:'var(--fg-dim)', letterSpacing:'0.08em', marginBottom:6, display:'flex', alignItems:'center', gap:6 }}>
+                <span className="material-symbols-outlined" style={{ fontSize:13 }}>lock</span>
+                FIXED SYSTEM PROMPT — READ ONLY
+              </div>
+              <textarea
+                className="cfb-textarea"
+                value={fixedSystemPrompt || ''}
+                readOnly
+                style={{ fontFamily:'var(--mo)', fontSize:10, height:220, opacity:0.7, cursor:'default', resize:'vertical' }}
+              />
+              <div style={{ fontSize:9, color:'var(--fg-dim)', marginTop:4 }}>
+                This contract defines the output schema, renderCode rules, CSS variables, and visualization decision matrix. It is always prepended to every LLM request.
+              </div>
+            </div>
+
+            <div>
+              <div style={{ fontSize:10, fontWeight:700, color:'var(--primary)', letterSpacing:'0.08em', marginBottom:6, display:'flex', alignItems:'center', gap:6 }}>
+                <span className="material-symbols-outlined" style={{ fontSize:13 }}>edit</span>
+                USER PREFERENCES — EDITABLE
+              </div>
+              <textarea
+                className="cfb-textarea"
+                value={cfg.userSystemPrompt || ''}
+                onChange={e => set('userSystemPrompt', e.target.value)}
+                placeholder={`Add custom instructions appended to the system prompt, e.g.:\n• Always use dark-toned color schemes\n• Prefer chart visualizations over tables\n• My timezone is UTC+4, format times accordingly\n• Use metric units by default\n• Cards should always include a data source footer`}
+                style={{ fontFamily:'var(--mo)', fontSize:11, height:140, resize:'vertical' }}
+              />
+              <div style={{ fontSize:9, color:'var(--fg-dim)', marginTop:4 }}>
+                Appended after the fixed prompt under a "User Preferences" section. Auto-saved immediately.
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

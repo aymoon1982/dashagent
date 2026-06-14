@@ -263,19 +263,33 @@ body {
   padding: 14px var(--page-pad) 48px;
 }
 
-/* ── DEMO BANNER ── */
-.demo-banner {
-  display: flex; align-items: center; gap: 12px;
-  padding: 10px 14px;
-  margin-bottom: 10px;
+/* ── ONBOARDING CTA ── */
+.onboarding-cta {
+  display: flex; align-items: center; gap: 16px;
+  padding: 18px 20px;
+  margin-bottom: 14px;
   border-radius: var(--rl);
-  background: rgba(245,158,11,.06);
-  border: 1px solid rgba(245,158,11,.2);
-  border-left: 3px solid var(--warning);
+  background: rgba(99,102,241,.07);
+  border: 1px solid rgba(99,102,241,.25);
+  border-left: 3px solid var(--primary);
 }
-.demo-banner .material-symbols-outlined { color: var(--warning); font-size: 18px; flex-shrink: 0; }
-.demo-banner-title { font-size: 12px; font-weight: 700; }
-.demo-banner-desc { font-size: 11px; color: var(--fg-muted); margin-top: 2px; }
+.onboarding-icon {
+  width: 40px; height: 40px; flex-shrink: 0;
+  border-radius: 10px;
+  background: rgba(99,102,241,.15);
+  display: flex; align-items: center; justify-content: center;
+}
+.onboarding-icon .material-symbols-outlined { color: var(--primary); font-size: 20px; }
+.onboarding-body { flex: 1; min-width: 0; }
+.onboarding-title { font-size: 13px; font-weight: 700; margin-bottom: 3px; }
+.onboarding-desc { font-size: 11px; color: var(--fg-muted); line-height: 1.5; }
+
+/* ── EMPTY DASHBOARD ── */
+.empty-dashboard {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: 60px 20px;
+  text-align: center;
+}
 
 /* ── GROUPS ── */
 .group-section {
@@ -973,7 +987,7 @@ body {
   .view-tab .material-symbols-outlined { font-size: 16px; }
   .view-tab span:not(.material-symbols-outlined) { display: none; }
 
-  .status-pill { display: none; } /* save space, status reflected in demo banner */
+  .status-pill { display: none; }
 
   .preset-chip-text { display: none; } /* icon-only chips */
   .preset-chip { padding: 4px 7px; }
@@ -987,7 +1001,7 @@ body {
   .cards-grid { grid-template-columns: repeat(4, 1fr); }
   .card-wrapper { grid-column: span min(var(--cols, 2), 4); }
 
-  .demo-banner-desc { display: none; }
+  .onboarding-desc { display: none; }
 }
 
 /* ── Phone: ≤480px ── */
