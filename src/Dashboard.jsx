@@ -15,7 +15,7 @@ function PromptConsole({ consolePrompt, setConsolePrompt, onAddCard, isSubmittin
         <input
           ref={inputRef}
           className="prompt-input"
-          placeholder="Ask your dashboard anything… e.g. 'Show me Bitcoin price this week'"
+          placeholder="Ask your dashboard anything…"
           value={consolePrompt}
           onChange={e => setConsolePrompt(e.target.value)}
           onFocus={() => setFocused(true)}
@@ -23,10 +23,10 @@ function PromptConsole({ consolePrompt, setConsolePrompt, onAddCard, isSubmittin
           onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onAddCard(consolePrompt); } }}
           disabled={isSubmitting}
         />
-        <button className="btn btn-primary" disabled={isSubmitting} onClick={() => onAddCard(consolePrompt)}>
+        <button className="btn btn-primary prompt-btn" disabled={isSubmitting} onClick={() => onAddCard(consolePrompt)}>
           {isSubmitting
-            ? <><span className="material-symbols-outlined spinning">psychology</span> Analyzing…</>
-            : <><span className="material-symbols-outlined">add_circle</span> Generate</>}
+            ? <><span className="material-symbols-outlined spinning">psychology</span><span className="prompt-btn-label"> Analyzing…</span></>
+            : <><span className="material-symbols-outlined">add_circle</span><span className="prompt-btn-label"> Generate</span></>}
         </button>
       </div>
       {(focused || consolePrompt) && workflowConfig.enableAutocomplete && samplePrompts.length > 0 && (
@@ -34,7 +34,7 @@ function PromptConsole({ consolePrompt, setConsolePrompt, onAddCard, isSubmittin
           {samplePrompts.map((p, i) => (
             <button key={i} className="preset-chip" onMouseDown={() => { setConsolePrompt(p.text); inputRef.current?.focus(); }}>
               <span className="material-symbols-outlined">{p.icon}</span>
-              {p.text}
+              <span className="preset-chip-text">{p.text}</span>
             </button>
           ))}
         </div>
@@ -69,90 +69,134 @@ function CardWrapper({ card, group, groups, handlers, isEditing, editPromptValue
       onDragOver={e => handlers.onDragOver(e, card.id)}
       onDragEnd={handlers.onDragEnd}
     >
-      <div className={`card-inner${isDragging ? ' dragging' : ''}`}>
-        <div className="card-top-accent" style={{ background: `linear-gradient(90deg, ${color}, ${color}55)` }} />
+      <div className={`card-inner${isDragging ? ' dragging' : ''}${isEditing ? ' is-editing' : ''}`}>
 
-        <div className="card-hd">
-          <div className="card-type-ico" style={{ background: accentBg }}>
-            <span className="material-symbols-outlined" style={{ color: accent }}>
-              {card.isCreating ? 'edit_note' : (FMT_ICONS[card.cardType] || 'dashboard')}
-            </span>
-          </div>
-          <div className="card-meta">
-            <div className="card-title">{card.isCreating ? 'New Card' : card.title}</div>
-            <div className="card-sub">
-              {card.isCreating ? 'Describe what to display' :
-               card.loading ? 'Analyzing intent…' :
-               `${card.dataSource || ''}${card.lastFetched ? ` · ${new Date(card.lastFetched).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}` : ''}`}
+        {/* ── FRONT FACE ── */}
+        <div className="card-face-front">
+          <div className="card-top-accent" style={{ background: `linear-gradient(90deg, ${color}, ${color}55)` }} />
+
+          <div className="card-hd">
+            <div className="card-type-ico" style={{ background: accentBg }}>
+              <span className="material-symbols-outlined" style={{ color: accent }}>
+                {card.isCreating ? 'edit_note' : (FMT_ICONS[card.cardType] || 'dashboard')}
+              </span>
             </div>
+            <div className="card-meta">
+              <div className="card-title">{card.isCreating ? 'New Card' : card.title}</div>
+              <div className="card-sub">
+                {card.isCreating ? 'Describe what to display' :
+                 card.loading ? 'Analyzing intent…' :
+                 `${card.dataSource || ''}${card.lastFetched ? ` · ${new Date(card.lastFetched).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}` : ''}`}
+              </div>
+            </div>
+
+            {!card.isCreating && !card.loading && !card.error && (
+              <>
+                <select className="group-sel" value={card.group} onChange={e => handlers.onMove(card.id, e.target.value)} title="Move to group">
+                  {groups.map(g => <option key={g.name} value={g.name}>📁 {g.name}</option>)}
+                </select>
+                <div className="fmt-sw">
+                  {fmts.map(fmt => (
+                    <button key={fmt} className={`fmt-btn${card.cardType === fmt ? ' active' : ''}`} title={`View as ${fmt}`} onClick={() => handlers.onOverride(card.id, fmt)}>
+                      <span className="material-symbols-outlined">{FMT_ICONS[fmt] || 'dashboard'}</span>
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+
+            {!card.isCreating && (
+              <div className="card-menu-wrap" ref={menuRef}>
+                <button className="card-menu-btn" onClick={() => setMenuOpen(o => !o)}>
+                  <span className="material-symbols-outlined">more_horiz</span>
+                </button>
+                {menuOpen && (
+                  <div className="card-dropdown">
+                    <div className="dd-item" onClick={() => { handlers.onRefresh(card.id); setMenuOpen(false); }}>
+                      <span className="material-symbols-outlined">refresh</span> Refresh
+                    </div>
+                    <div className="dd-item" onClick={() => { handlers.onStartEdit(card); setMenuOpen(false); }}>
+                      <span className="material-symbols-outlined">edit</span> Edit Prompt
+                    </div>
+                    <div className="dd-sep" />
+                    <div className="dd-item danger" onClick={() => { handlers.onDelete(card.id); setMenuOpen(false); }}>
+                      <span className="material-symbols-outlined">delete</span> Delete Card
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
-          {!card.isCreating && !card.loading && !card.error && (
-            <>
-              <select className="group-sel" value={card.group} onChange={e => handlers.onMove(card.id, e.target.value)} title="Move to group">
-                {groups.map(g => <option key={g.name} value={g.name}>📁 {g.name}</option>)}
-              </select>
-              <div className="fmt-sw">
-                {fmts.map(fmt => (
-                  <button key={fmt} className={`fmt-btn${card.cardType === fmt ? ' active' : ''}`} title={`View as ${fmt}`} onClick={() => handlers.onOverride(card.id, fmt)}>
-                    <span className="material-symbols-outlined">{FMT_ICONS[fmt] || 'dashboard'}</span>
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
+          <div className="card-bd">
+            {card.isCreating
+              ? <InlineCardCreator card={card} onGenerate={handlers.onGenerate} onCancel={handlers.onCancel} />
+              : <CardBody card={card} handlers={handlers} />
+            }
+          </div>
 
           {!card.isCreating && (
-            <div className="card-menu-wrap" ref={menuRef}>
-              <button className="card-menu-btn" onClick={() => setMenuOpen(o => !o)}>
-                <span className="material-symbols-outlined">more_horiz</span>
-              </button>
-              {menuOpen && (
-                <div className="card-dropdown">
-                  <div className="dd-item" onClick={() => { handlers.onRefresh(card.id); setMenuOpen(false); }}>
-                    <span className="material-symbols-outlined">refresh</span> Refresh
-                  </div>
-                  <div className="dd-item" onClick={() => { handlers.onStartEdit(card); setMenuOpen(false); }}>
-                    <span className="material-symbols-outlined">edit</span> Edit Prompt
-                  </div>
-                  <div className="dd-sep" />
-                  <div className="dd-item danger" onClick={() => { handlers.onDelete(card.id); setMenuOpen(false); }}>
-                    <span className="material-symbols-outlined">delete</span> Delete Card
-                  </div>
-                </div>
-              )}
+            <div className="card-ft" onClick={() => handlers.onStartEdit(card)}>
+              <span className="material-symbols-outlined" style={{ fontSize:11, color:'var(--fg-dim)', flexShrink:0 }}>edit</span>
+              <span className="prompt-echo" title={card.prompt}>"{card.prompt}"</span>
+              <div className="card-badges">
+                <span className="badge">{card.cardType}</span>
+                <span className="badge">{card.size}</span>
+                {card.refreshInterval > 0 && <span className="badge live">live</span>}
+              </div>
             </div>
           )}
         </div>
 
-        <div className="card-bd">
-          {card.isCreating
-            ? <InlineCardCreator card={card} onGenerate={handlers.onGenerate} onCancel={handlers.onCancel} />
-            : <CardBody card={card} handlers={handlers} />
-          }
-        </div>
-
-        {!card.isCreating && !isEditing && (
-          <div className="card-ft" onClick={() => handlers.onStartEdit(card)}>
-            <span className="prompt-echo" title={card.prompt}>"{card.prompt}"</span>
-            <div className="card-badges">
-              <span className="badge">{card.cardType}</span>
-              <span className="badge">{card.size}</span>
-              {card.refreshInterval > 0 && <span className="badge live">live</span>}
+        {/* ── BACK FACE (edit mode) — flips in over the front ── */}
+        {isEditing && (
+          <div className="card-face-back" onClick={e => e.stopPropagation()}>
+            <div className="cfb-top-accent" style={{ background: `linear-gradient(90deg, ${color}, ${color}55)` }} />
+            <div className="cfb-header">
+              <div className="card-type-ico" style={{ background: accentBg }}>
+                <span className="material-symbols-outlined" style={{ color: accent }}>edit</span>
+              </div>
+              <div className="card-meta">
+                <div className="card-title">Edit Card</div>
+                <div className="card-sub">{card.title}</div>
+              </div>
+              <button className="icon-btn cfb-close" onClick={handlers.onCancelEdit}>
+                <span className="material-symbols-outlined">close</span>
+              </button>
             </div>
-          </div>
-        )}
-        {!card.isCreating && isEditing && (
-          <div className="prompt-edit-row">
-            <input
-              className="prompt-edit-in"
-              value={editPromptValue}
-              onChange={e => setEditPromptValue(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') handlers.onSaveEdit(card.id); if (e.key === 'Escape') handlers.onCancelEdit(); }}
-              autoFocus
-            />
-            <button className="btn btn-primary btn-sm" onClick={() => handlers.onSaveEdit(card.id)}>Update</button>
-            <button className="btn btn-secondary btn-sm" onClick={handlers.onCancelEdit}>✕</button>
+
+            <div className="cfb-body">
+              <div className="cfb-label">PROMPT</div>
+              <textarea
+                className="cfb-textarea"
+                value={editPromptValue}
+                onChange={e => setEditPromptValue(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handlers.onSaveEdit(card.id);
+                  if (e.key === 'Escape') handlers.onCancelEdit();
+                }}
+                autoFocus
+                placeholder="Describe what this card should display…"
+              />
+              <div className="cfb-hint">
+                <span className="material-symbols-outlined" style={{ fontSize:11 }}>info</span>
+                ⌘/Ctrl+Enter to regenerate · Esc to cancel
+              </div>
+            </div>
+
+            <div className="cfb-footer">
+              <div className="card-badges">
+                <span className="badge">{card.cardType}</span>
+                <span className="badge">{card.size}</span>
+                {card.refreshInterval > 0 && <span className="badge live">live</span>}
+              </div>
+              <div style={{ display:'flex', gap:5, flexShrink:0 }}>
+                <button className="btn btn-secondary btn-sm" onClick={handlers.onCancelEdit}>Cancel</button>
+                <button className="btn btn-primary btn-sm" onClick={() => handlers.onSaveEdit(card.id)}>
+                  <span className="material-symbols-outlined">auto_awesome</span> Regenerate
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </div>
@@ -201,7 +245,8 @@ function GroupSection({ group, cards, groups, handlers, editingCardId, editPromp
 
         <div className="group-acts">
           <button className="group-btn" onClick={() => handlers.onAddPlaceholder(group.name)}>
-            <span className="material-symbols-outlined">add</span> Add Card
+            <span className="material-symbols-outlined">add</span>
+            <span className="group-btn-label"> Add Card</span>
           </button>
           {groupCards.length === 0 && (
             <button className="group-btn danger" onClick={() => setGroups(prev => prev.filter(g => g.name !== group.name))}>
@@ -219,7 +264,7 @@ function GroupSection({ group, cards, groups, handlers, editingCardId, editPromp
           {groupCards.length === 0 && (
             <div className="group-empty">
               <span className="material-symbols-outlined" style={{ fontSize:18 }}>dashboard_customize</span>
-              Drag cards here or click "Add Card" to populate this group
+              Drag cards here or click "Add Card"
             </div>
           )}
           {groupCards.map(card => (
@@ -260,10 +305,11 @@ export function DashboardView({ cards, groups, setGroups, isApiConnected, workfl
             <span className="material-symbols-outlined">info</span>
             <div>
               <div className="demo-banner-title">Demo Mode — No API Key Configured</div>
-              <div className="demo-banner-desc">Using simulation engine. Open Settings to connect OpenRouter, OpenAI, or OpenCode Go for live AI-powered card generation.</div>
+              <div className="demo-banner-desc">Open Settings to connect OpenRouter, OpenAI, or OpenCode Go for live AI-powered card generation.</div>
             </div>
             <button className="btn btn-secondary btn-sm" onClick={handlers.onOpenSettings} style={{ flexShrink:0 }}>
-              <span className="material-symbols-outlined">settings</span> Setup API
+              <span className="material-symbols-outlined">settings</span>
+              <span className="prompt-btn-label"> Setup</span>
             </button>
           </div>
         )}
@@ -286,7 +332,8 @@ export function DashboardView({ cards, groups, setGroups, isApiConnected, workfl
 
         <div className="add-group-row">
           <button className="btn btn-secondary" onClick={handlers.onAddGroup}>
-            <span className="material-symbols-outlined">create_new_folder</span> Create New Group
+            <span className="material-symbols-outlined">create_new_folder</span>
+            <span className="prompt-btn-label"> New Group</span>
           </button>
         </div>
       </div>
