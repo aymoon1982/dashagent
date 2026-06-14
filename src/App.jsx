@@ -32,9 +32,13 @@ const DEFAULT_GROUPS = [
 ];
 
 /* ─── FIXED SYSTEM PROMPT ─── */
-export const FIXED_SYSTEM_PROMPT = `You are a dashboard card generator for Agntdash. CRITICAL: respond with ONLY a raw JSON object — no markdown code fences, no explanation text, no preamble. Start your response with { and end with }.
+export const FIXED_SYSTEM_PROMPT = `You are a dashboard card generator for Agntdash, an AI-native fluid grid dashboard.
 
-You are an AI-native fluid grid dashboard card generator.
+CRITICAL OUTPUT RULES (violations will break the app):
+1. Respond with ONLY a raw JSON object. No markdown fences, no preamble, no explanation. Your entire response must start with { and end with }.
+2. renderCode MUST use React.createElement() exclusively. NEVER write JSX (< > tags). JSX is not valid JavaScript inside new Function() and will cause a SyntaxError.
+   WRONG: return (<div>hello</div>)
+   RIGHT: return React.createElement('div', null, 'hello')
 
 ## Your Mission (execute in this exact order)
 
@@ -285,31 +289,63 @@ export default function App() {
       ? `User request: ${promptText}\n\nLive search results (use as primary data source):\n${searchContext}`
       : `User request: ${promptText}`;
 
-    const res = await llm(modelSmart, [{role:'system',content:sysContent},{role:'user',content:userMsg}], workflowConfig.plannerTemp || 0.3);
-    if (!res.ok) {
-      let detail = res.statusText;
-      try {
-        const errJson = await res.json();
-        detail = errJson.error?.message || errJson.message || JSON.stringify(errJson).slice(0, 200);
-      } catch (_) {
-        detail = (await res.text().catch(() => '')).slice(0, 200) || res.statusText;
+    // JSX detection: strip string literals then look for < tag patterns
+    const containsJSX = (code) => {
+      if (!code) return false;
+      const stripped = code.replace(/'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"|`(?:[^`\\]|\\.)*`/g, '""');
+      return /<[a-zA-Z][a-zA-Z0-9.]*[\s\/>]/.test(stripped);
+    };
+
+    // Helper: call Stage 3 and return parsed payload
+    const callStage3 = async (messages) => {
+      const res = await llm(modelSmart, messages, workflowConfig.plannerTemp || 0.3);
+      if (!res.ok) {
+        let detail = res.statusText;
+        try {
+          const errJson = await res.json();
+          detail = errJson.error?.message || errJson.message || JSON.stringify(errJson).slice(0, 200);
+        } catch (_) {
+          detail = (await res.text().catch(() => '')).slice(0, 200) || res.statusText;
+        }
+        throw new Error(`[Stage 3 / ${modelSmart}] HTTP ${res.status}: ${detail}`);
       }
-      throw new Error(`[Stage 3 / ${modelSmart}] HTTP ${res.status}: ${detail}`);
+      const raw = await res.json();
+      const content = raw.choices?.[0]?.message?.content;
+      if (!content) throw new Error(`[Stage 3 / ${modelSmart}] Model returned an empty response. The model may have refused or hit its context limit. Try a different prompt or model.`);
+      return extractJSON(content);
+    };
+
+    const baseMessages = [{role:'system',content:sysContent},{role:'user',content:userMsg}];
+    let payload = await callStage3(baseMessages);
+
+    // Auto-retry if LLM generated JSX instead of React.createElement
+    if (containsJSX(payload.renderCode)) {
+      console.warn('[Agntdash] JSX detected in renderCode — auto-retrying with correction...');
+      try {
+        payload = await callStage3([
+          ...baseMessages,
+          { role:'assistant', content: JSON.stringify(payload) },
+          { role:'user', content: '⚠️ CRITICAL CORRECTION: Your renderCode contains JSX syntax (HTML-like < > tags). JSX is not valid JavaScript and causes a SyntaxError. You MUST rewrite the entire renderCode function using ONLY React.createElement() calls — zero JSX tags anywhere. Example: React.createElement("div", {style:{color:"red"}}, "text") — never <div style={{color:"red"}}>text</div>. Return the complete corrected JSON now.' }
+        ]);
+      } catch (retryErr) {
+        console.warn('[Agntdash] JSX retry failed:', retryErr.message);
+      }
     }
-    const raw = await res.json();
-    const content = raw.choices?.[0]?.message?.content;
-    if (!content) throw new Error(`[Stage 3 / ${modelSmart}] Model returned an empty response. The model may have refused the request or hit its context limit. Try a different prompt or model.`);
 
-    const payload = extractJSON(content);
-
-    // Validate renderCode syntax — non-fatal, card will show a render error instead
+    // Validate renderCode syntax — non-fatal: card loads, renderer shows parse error with code
     if (payload.renderCode) {
       try {
         // eslint-disable-next-line no-new-func
         new Function('React', 'return (' + payload.renderCode + ')');
       } catch (syntaxErr) {
-        console.warn('renderCode syntax warning:', syntaxErr.message);
-        payload.renderSpec = { ...(payload.renderSpec||{}), summary: `⚠ Render issue: ${syntaxErr.message}` };
+        const isJSX = containsJSX(payload.renderCode);
+        console.warn('[Agntdash] renderCode syntax error:', syntaxErr.message);
+        payload.renderSpec = {
+          ...(payload.renderSpec || {}),
+          summary: isJSX
+            ? `Syntax error: model used JSX instead of React.createElement(). Click Retry.`
+            : `Syntax error: ${syntaxErr.message}. Click Retry.`
+        };
       }
     }
 
