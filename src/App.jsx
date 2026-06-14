@@ -207,19 +207,20 @@ export default function App() {
 
   /* ─── JSON EXTRACTION (robust, model-agnostic) ─── */
   const extractJSON = (text) => {
-    if (!text) throw new Error('Empty response from model');
-    // 1. Try direct parse
+    if (!text) throw new Error('Empty response from model — the API returned no content. Try again or switch models.');
+    // 1. Direct parse
     try { return JSON.parse(text); } catch (_) {}
-    // 2. Strip all markdown code fences then retry
+    // 2. Strip markdown fences then retry
     const stripped = text.replace(/^```(?:json)?\s*/im, '').replace(/```\s*$/m, '').trim();
     try { return JSON.parse(stripped); } catch (_) {}
-    // 3. Find the outermost {...} block
+    // 3. Find outermost {...} block
     const start = text.indexOf('{');
     const end = text.lastIndexOf('}');
     if (start !== -1 && end > start) {
       try { return JSON.parse(text.slice(start, end + 1)); } catch (_) {}
     }
-    throw new Error('Model returned non-JSON response. Try a different smart model.');
+    const preview = text.slice(0, 120).replace(/\n/g, ' ');
+    throw new Error(`Model returned non-JSON. Got: "${preview}…" — Try a different smart model or lower temperature.`);
   };
 
   /* ─── AGENT PIPELINE (3-stage) ─── */
@@ -286,12 +287,18 @@ export default function App() {
 
     const res = await llm(modelSmart, [{role:'system',content:sysContent},{role:'user',content:userMsg}], workflowConfig.plannerTemp || 0.3);
     if (!res.ok) {
-      const errBody = await res.text().catch(() => '');
-      throw new Error(`Code generator failed (${res.status}): ${errBody.slice(0,200) || res.statusText}`);
+      let detail = res.statusText;
+      try {
+        const errJson = await res.json();
+        detail = errJson.error?.message || errJson.message || JSON.stringify(errJson).slice(0, 200);
+      } catch (_) {
+        detail = (await res.text().catch(() => '')).slice(0, 200) || res.statusText;
+      }
+      throw new Error(`[Stage 3 / ${modelSmart}] HTTP ${res.status}: ${detail}`);
     }
     const raw = await res.json();
     const content = raw.choices?.[0]?.message?.content;
-    if (!content) throw new Error('Model returned an empty response. Try again or switch models.');
+    if (!content) throw new Error(`[Stage 3 / ${modelSmart}] Model returned an empty response. The model may have refused the request or hit its context limit. Try a different prompt or model.`);
 
     const payload = extractJSON(content);
 
@@ -341,14 +348,14 @@ export default function App() {
   };
 
   const handleRefreshCard = async (cardId) => {
-    setCards(prev => prev.map(c => c.id===cardId ? {...c, loading:true} : c));
     const card = cards.find(c => c.id===cardId);
-    if (!card) return;
+    if (!card || card.isCreating) return;
+    setCards(prev => prev.map(c => c.id===cardId ? {...c, loading:true, error:null} : c));
     try {
       const updated = await runAgentPipeline(card.prompt, cardId);
       setCards(prev => prev.map(c => c.id===cardId ? updated : c));
     } catch (err) {
-      setCards(prev => prev.map(c => c.id===cardId ? {...c, loading:false, error:err.message} : c));
+      setCards(prev => prev.map(c => c.id===cardId ? {...c, loading:false, error:err.message || 'Unknown error'} : c));
     }
   };
 
@@ -360,12 +367,12 @@ export default function App() {
   const handleSavePromptEdit = async (cardId) => {
     if (!editPromptValue.trim()) return;
     setEditingCardId(null);
-    setCards(prev => prev.map(c => c.id===cardId ? {...c, prompt:editPromptValue, loading:true} : c));
+    setCards(prev => prev.map(c => c.id===cardId ? {...c, prompt:editPromptValue, loading:true, error:null} : c));
     try {
       const updated = await runAgentPipeline(editPromptValue, cardId);
       setCards(prev => prev.map(c => c.id===cardId ? updated : c));
     } catch (err) {
-      setCards(prev => prev.map(c => c.id===cardId ? {...c, loading:false, error:err.message} : c));
+      setCards(prev => prev.map(c => c.id===cardId ? {...c, loading:false, error:err.message || 'Unknown error'} : c));
     }
   };
 
@@ -376,9 +383,9 @@ export default function App() {
   };
 
   const handleGenerateInlineCard = async (cardId, promptText) => {
-    setCards(prev => prev.map(c => c.id===cardId ? {...c, prompt:promptText, title:'Analyzing…', isCreating:false, loading:true} : c));
+    setCards(prev => prev.map(c => c.id===cardId ? {...c, prompt:promptText, title:'Analyzing…', isCreating:false, loading:true, error:null} : c));
     try { const card = await runAgentPipeline(promptText, cardId); setCards(prev => prev.map(c => c.id===cardId ? card : c)); }
-    catch (err) { setCards(prev => prev.map(c => c.id===cardId ? {...c, title:'Error', loading:false, error:err.message} : c)); }
+    catch (err) { setCards(prev => prev.map(c => c.id===cardId ? {...c, title:'Generation Error', loading:false, error:err.message || 'Unknown error'} : c)); }
   };
 
   const handleCancelInlineCard = id => setCards(prev => prev.filter(c => c.id !== id));

@@ -648,9 +648,10 @@ body {
   gap: 7px; height: 100%;
   text-align: center; padding: 14px;
 }
-.card-error .material-symbols-outlined { font-size: 24px; color: var(--danger); }
-.err-title { font-size: 12px; font-weight: 700; color: var(--fg-muted); }
-.err-desc { font-size: 10px; color: var(--fg-dim); line-height: 1.4; }
+.card-error .material-symbols-outlined { font-size: 24px; color: var(--warning); }
+.err-title { font-size: 12px; font-weight: 700; color: var(--fg); }
+.err-desc { font-size: 10px; color: var(--fg-muted); line-height: 1.5; max-width: 280px; word-break: break-word; }
+.err-retry { margin-top: 4px; }
 
 /* ── CARD BODIES ── */
 .chart-wrap { flex: 1; min-height: 0; overflow: hidden; }

@@ -44,45 +44,112 @@ export function InlineCardCreator({ card, onGenerate, onCancel }) {
   );
 }
 
+/* ─── ERROR BOUNDARY (catches runtime errors inside LLM-generated components) ─── */
+class RenderErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { error: null }; }
+  static getDerivedStateFromError(err) { return { error: err }; }
+  componentDidCatch(err, info) { console.error('[Agntdash] Card render error:', err.message, info.componentStack?.split('\n')[1]?.trim()); }
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="card-error">
+          <span className="material-symbols-outlined">bug_report</span>
+          <div className="err-title">Render Error</div>
+          <div className="err-desc">{this.state.error.message}</div>
+          {this.props.onRetry && (
+            <button className="btn btn-secondary btn-sm err-retry" onClick={this.props.onRetry}>
+              <span className="material-symbols-outlined">refresh</span> Retry
+            </button>
+          )}
+          <details style={{ fontSize:9, color:'var(--fg-dim)', marginTop:6, width:'100%' }}>
+            <summary style={{ cursor:'pointer' }}>View render code</summary>
+            <pre style={{ marginTop:4, whiteSpace:'pre-wrap', wordBreak:'break-all', maxHeight:120, overflow:'auto' }}>{this.props.renderCode}</pre>
+          </details>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 /* ─── UNIVERSAL LLM RENDERER ─── */
-// renderCode is a JS function declaration: function CardRenderer({data, renderSpec}) { ... }
-// Executed via: new Function('React', '"use strict"; return (' + renderCode + ')')(React)
-// This returns a React component that can use React.useState / React.useEffect.
-function LLMCardRenderer({ card }) {
+// renderCode is a function declaration string: function CardRenderer({data, renderSpec}) { ... }
+// new Function creates a real React component so React.useState / React.useEffect work.
+function LLMCardRenderer({ card, onRetry }) {
   const { data, renderSpec, renderCode } = card;
+
   if (!renderCode) {
     return (
       <div className="card-error">
         <span className="material-symbols-outlined">code_off</span>
-        <div className="err-title">No render code</div>
-        <div className="err-desc">This card has no rendering code. Try regenerating it.</div>
+        <div className="err-title">No Render Code</div>
+        <div className="err-desc">The model didn't return a renderCode function. Try regenerating this card.</div>
+        {onRetry && (
+          <button className="btn btn-secondary btn-sm err-retry" onClick={onRetry}>
+            <span className="material-symbols-outlined">refresh</span> Retry
+          </button>
+        )}
       </div>
     );
   }
+
+  let Comp;
   try {
     // eslint-disable-next-line no-new-func
-    const Comp = new Function('React', '"use strict"; return (' + renderCode + ')')(React);
-    return React.createElement(
-      'div',
-      { style: { height: '100%', overflow: 'auto', display: 'flex', flexDirection: 'column' } },
-      React.createElement(Comp, { data, renderSpec })
-    );
-  } catch (err) {
+    Comp = new Function('React', 'return (' + renderCode + ')')(React);
+  } catch (parseErr) {
     return (
       <div className="card-error">
-        <span className="material-symbols-outlined">warning</span>
-        <div className="err-title">Render Error</div>
-        <div className="err-desc">{err.message}</div>
-        <details style={{ fontSize:9, color:'var(--fg-dim)', marginTop:4 }}>
+        <span className="material-symbols-outlined">syntax_error</span>
+        <div className="err-title">Syntax Error</div>
+        <div className="err-desc">{parseErr.message}</div>
+        {onRetry && (
+          <button className="btn btn-secondary btn-sm err-retry" onClick={onRetry}>
+            <span className="material-symbols-outlined">refresh</span> Retry
+          </button>
+        )}
+        <details style={{ fontSize:9, color:'var(--fg-dim)', marginTop:6, width:'100%' }}>
           <summary style={{ cursor:'pointer' }}>View render code</summary>
-          <pre style={{ marginTop:4, whiteSpace:'pre-wrap', wordBreak:'break-all', maxHeight:100, overflow:'auto' }}>{renderCode}</pre>
+          <pre style={{ marginTop:4, whiteSpace:'pre-wrap', wordBreak:'break-all', maxHeight:120, overflow:'auto' }}>{renderCode}</pre>
         </details>
       </div>
     );
   }
+
+  return (
+    <RenderErrorBoundary renderCode={renderCode} onRetry={onRetry}>
+      {React.createElement(
+        'div',
+        { style: { height: '100%', overflow: 'auto', display: 'flex', flexDirection: 'column' } },
+        React.createElement(Comp, { data, renderSpec })
+      )}
+    </RenderErrorBoundary>
+  );
 }
 
-export function CardBody({ card }) {
+/* ─── CLASSIFY PIPELINE ERROR for friendlier titles/icons ─── */
+function classifyError(msg = '') {
+  const m = msg.toLowerCase();
+  if (m.includes('no api key') || m.includes('open settings'))
+    return { icon:'key_off', title:'No API Key', color:'var(--warning)' };
+  if (m.includes('401') || m.includes('unauthorized') || m.includes('authentication') || m.includes('invalid key'))
+    return { icon:'lock', title:'Authentication Failed', color:'var(--danger)' };
+  if (m.includes('402') || m.includes('payment') || m.includes('billing') || m.includes('quota exceeded'))
+    return { icon:'credit_card_off', title:'Billing / Quota', color:'var(--danger)' };
+  if (m.includes('429') || m.includes('rate limit') || m.includes('too many request'))
+    return { icon:'hourglass_empty', title:'Rate Limited', color:'var(--warning)' };
+  if (m.includes('503') || m.includes('502') || m.includes('500') || m.includes('server error'))
+    return { icon:'cloud_off', title:'Server Error', color:'var(--danger)' };
+  if (m.includes('non-json') || m.includes('json') || m.includes('parse'))
+    return { icon:'code_off', title:'Bad Model Response', color:'var(--warning)' };
+  if (m.includes('empty response'))
+    return { icon:'question_mark', title:'Empty Response', color:'var(--fg-dim)' };
+  if (m.includes('fetch') || m.includes('network') || m.includes('failed to fetch'))
+    return { icon:'wifi_off', title:'Network Error', color:'var(--danger)' };
+  return { icon:'warning', title:'Generation Failed', color:'var(--warning)' };
+}
+
+export function CardBody({ card, onRetry }) {
   if (card.loading) {
     return (
       <div className="card-loading">
@@ -96,13 +163,19 @@ export function CardBody({ card }) {
     );
   }
   if (card.error) {
+    const { icon, title, color } = classifyError(card.error);
     return (
       <div className="card-error">
-        <span className="material-symbols-outlined">warning</span>
-        <div className="err-title">Pipeline Failed</div>
+        <span className="material-symbols-outlined" style={{ color }}>{icon}</span>
+        <div className="err-title" style={{ color }}>{title}</div>
         <div className="err-desc">{card.error}</div>
+        {onRetry && (
+          <button className="btn btn-secondary btn-sm err-retry" onClick={onRetry}>
+            <span className="material-symbols-outlined">refresh</span> Retry
+          </button>
+        )}
       </div>
     );
   }
-  return <LLMCardRenderer card={card} />;
+  return <LLMCardRenderer card={card} onRetry={onRetry} />;
 }

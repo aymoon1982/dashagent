@@ -119,7 +119,7 @@ function CardWrapper({ card, group, groups, handlers, isEditing, editPromptValue
           <div className="card-bd">
             {card.isCreating
               ? <InlineCardCreator card={card} onGenerate={handlers.onGenerate} onCancel={handlers.onCancel} />
-              : <CardBody card={card} />
+              : <CardBody card={card} onRetry={() => handlers.onRefresh(card.id)} />
             }
           </div>
 
