@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 
 const DEFAULT_MODELS_FAST = ['google/gemini-2.5-flash','deepseek/deepseek-chat','meta-llama/llama-3.3-70b-instruct:free','openai/gpt-4o-mini','anthropic/claude-3-haiku'];
-const DEFAULT_MODELS_SMART = ['deepseek/deepseek-v4-pro','deepseek/deepseek-chat','anthropic/claude-3.5-sonnet','google/gemini-2.5-pro','openai/gpt-4o'];
+const DEFAULT_MODELS_SMART = ['deepseek/deepseek-chat','anthropic/claude-3.5-sonnet','google/gemini-2.5-pro','openai/gpt-4o'];
 
 /* ─── APP HEADER ─── */
 export function AppHeader({ activeView, setActiveView, isApiConnected, onOpenSettings, onRefreshAll }) {
@@ -361,7 +361,7 @@ export function PipelineView({ workflowConfig, setWorkflowConfig, modelFast, mod
             </select>
           </div>
           <div className="cfg-row">
-            <span className="cfg-lbl">Grid snap unit <strong style={{ color:'var(--fg)' }}>{cfg.gridSnapUnit||8}px</strong></span>
+            <span className="cfg-lbl">Card spacing (gap) <strong style={{ color:'var(--fg)' }}>{cfg.gridSnapUnit||8}px</strong></span>
             <input type="range" className="range" min="4" max="32" step="4" value={cfg.gridSnapUnit||8} onChange={e => set('gridSnapUnit', parseInt(e.target.value))} />
           </div>
           <div className="cfg-io"><strong>Layout:</strong> 12-column CSS grid, <code>grid-auto-flow: dense</code> fills gaps automatically when cards vary in size</div>

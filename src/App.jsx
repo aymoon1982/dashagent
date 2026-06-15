@@ -2,10 +2,11 @@ import { useState, useEffect, useRef } from 'react';
 import { AppHeader, SettingsDrawer, PipelineView } from './UI.jsx';
 import { DashboardView } from './Dashboard.jsx';
 import { validateRenderCode } from './transpile.js';
+import { resolveBindings, bindingsRefreshInterval, ALLOWED_HOSTS } from './dataLayer.js';
 
 /* ─── CONSTANTS ─── */
 const DEFAULT_MODELS_FAST = ['google/gemini-2.5-flash','deepseek/deepseek-chat','meta-llama/llama-3.3-70b-instruct:free','openai/gpt-4o-mini','anthropic/claude-3-haiku'];
-const DEFAULT_MODELS_SMART = ['deepseek/deepseek-v4-pro','deepseek/deepseek-chat','anthropic/claude-3.5-sonnet','google/gemini-2.5-pro','openai/gpt-4o'];
+const DEFAULT_MODELS_SMART = ['deepseek/deepseek-chat','anthropic/claude-3.5-sonnet','google/gemini-2.5-pro','openai/gpt-4o'];
 const ACCENT_COLORS = ['#6366f1','#a855f7','#10b981','#f59e0b','#ef4444','#ec4899','#06b6d4'];
 
 const SAMPLE_PROMPTS = [
@@ -44,9 +45,11 @@ CRITICAL OUTPUT RULE: Respond with ONLY a single raw JSON object. No markdown fe
 
 2. DECIDE STATIC vs LIVE — If the answer changes over time (prices, weather, FX, news, scores), make it LIVE: fetch real data at render time (see Live Data). If it is stable (conversions, knowledge, checklists, countdowns computed locally), make it static and embed the data.
 
-3. SIZE YOURSELF — Choose cols (1–12 grid columns) and rows (1–8 row units, each ~120px tall) that fit the content. A single number needs 3×1; a rich chart needs ~8×3; a wide table or multi-series panel can be 12×4. Do not over- or under-size.
+3. SIZE YOURSELF — Choose cols (1–12 grid columns) and rows (1–8 row units, each ~82px tall) that fit the content. A single number needs ~3×1; a rich chart needs ~8×3; a wide table or multi-series panel can be 12×4. The host also auto-fits height to content, so err slightly small rather than large.
 
-4. DESIGN & CODE — Write a self-contained React component in JSX. Make it genuinely beautiful and information-dense.
+4. CHOOSE YOUR FRAME — You control the card chrome, not just the inside. Pick "chrome" and "bleed" so the frame fits the content (see Frame).
+
+5. DESIGN & CODE — Write a self-contained React component in JSX. Make it genuinely beautiful and information-dense.
 
 ## Output Format (JSON only)
 
@@ -54,47 +57,59 @@ CRITICAL OUTPUT RULE: Respond with ONLY a single raw JSON object. No markdown fe
   "title": "Concise card title (3-6 words)",
   "cols": 6,
   "rows": 2,
+  "chrome": "full",
+  "bleed": false,
   "dataSource": "Where the data comes from (API name, 'live', or 'AI knowledge')",
-  "refreshInterval": 0,
-  "live": false,
+  "dataBindings": [],
   "data": {},
   "renderSpec": { "color": "#hex accent color", "summary": "One-sentence insight or status" },
   "renderCode": "function CardRenderer({ data, renderSpec }) { return (<div>…</div>); }"
 }
 
 - cols: integer 1–12. rows: integer 1–8. Size to the content.
-- refreshInterval: seconds between auto-refreshes (regenerates the card). 0 = never. Use 60–900 for live data; minimum honored is 15.
-- live: true if renderCode fetches its own real-time data at render time.
+
+## Frame (chrome + bleed)
+
+- chrome: "full" → title bar + footer + accent (default; good for charts, tables, KPIs with a label). "minimal" → no footer, slim header, hover menu (good for dense single-purpose cards). "none" → no chrome at all, content owns the whole card (REQUIRED for full-bleed photos, maps, hero visuals).
+- bleed: true → content reaches the card edges with no padding (use for photos, maps, edge-to-edge gradients/visuals). Usually pair bleed:true with chrome:"none".
+
+## Data: static vs live (IMPORTANT — read carefully)
+
+Do NOT fetch inside renderCode. Instead declare what you need; the host fetches it (with caching, retries, and refresh) and passes the result to your component as the \`data\` prop. This makes refresh cheap and keeps your component pure.
+
+- STATIC data (knowledge, conversions, checklists, anything that doesn't change): put it directly in \`data\` and leave \`dataBindings\` empty.
+- LIVE data: add entries to \`dataBindings\`. Each: { "key": "<name>", "url": "<allowlisted URL>", "refreshSec": <seconds, e.g. 60>, "path": "<optional dotted path into the JSON response>" }. The host fetches each url, follows \`path\` if given, and sets \`data[key]\` to the result. On failure \`data[key]\` is \`{ __error: "..." }\` — handle that.
+
+Your renderCode reads ONLY from the \`data\` prop. Render a graceful fallback when a value is missing or has \`__error\`.
+
+Allowlisted live hosts (any other host is refused): ${ALLOWED_HOSTS.join(', ')}. Examples:
+- Crypto price → url "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd", path "bitcoin.usd"
+- Crypto 7d history → url "https://api.coingecko.com/api/v3/coins/bitcoin/market_chart?vs_currency=usd&days=7", path "prices"
+- FX rates → url "https://api.frankfurter.app/latest?from=USD&to=EUR,GBP,JPY", path "rates"
+- Weather → url "https://api.open-meteo.com/v1/forecast?latitude=51.5&longitude=-0.12&current=temperature_2m,weather_code&daily=temperature_2m_max,temperature_2m_min&timezone=auto"
+- Tech news → url "https://hn.algolia.com/api/v1/search?tags=front_page", path "hits"
+
+For sources NOT on the allowlist (specific equities, paywalled news): use the injected web-search results or your knowledge as a clearly-labeled snapshot in \`data\`, leave dataBindings empty, and say so in the summary.
 
 ## renderCode Rules
 
-1. The component MUST be named exactly \`CardRenderer\` and take \`{ data, renderSpec }\`.
-2. WRITE JSX. Normal JSX (<div>, <svg>, …) is fully supported and preferred — it is transpiled for you. Do NOT hand-write React.createElement.
-3. Hooks: use \`React.useState\`, \`React.useEffect\`, \`React.useRef\` (the symbol \`React\` is in scope; there are no other imports).
-4. Self-contained: no external libraries, no import statements. Build charts with inline SVG.
-5. All styling inline via the \`style\` prop (use \`style={{ }}\`). You may also use the CSS variables below.
-6. Return exactly ONE root element. It should fill its container: root style \`{ height: '100%', display: 'flex', flexDirection: 'column' }\`.
-7. ALWAYS handle loading, empty, and error states gracefully — never crash. Null-check every data access.
+1. Named exactly \`CardRenderer\`, takes \`{ data, renderSpec }\`.
+2. WRITE JSX (<div>, <svg>, <img>, <table>…). It is transpiled for you. Do NOT hand-write React.createElement.
+3. Hooks via \`React.useState/useEffect/useRef\` (\`React\` is in scope; no imports).
+4. No external libraries. Build charts with inline SVG. Images via <img src=…> are fine (e.g. flags, Wikimedia/Unsplash URLs returned in data).
+5. Inline styles only (\`style={{ }}\`); you may use the CSS variables below.
+6. Return ONE root element filling its container: root style \`{ height: '100%', display: 'flex', flexDirection: 'column' }\` (for bleed cards, also set margin/padding 0 and let media use width/height 100% with objectFit cover).
+7. NEVER crash. Null-check every data access; handle missing/\`__error\` values.
 
 Available CSS variables (dark theme): \`var(--fg)\`, \`var(--fg-muted)\`, \`var(--fg-dim)\`, \`var(--primary)\` (#6366f1), \`var(--success)\` (#10b981), \`var(--danger)\` (#ef4444), \`var(--warning)\` (#f59e0b), \`var(--border)\`, \`var(--fn)\` (font), \`var(--mo)\` (monospace).
 
-## Live Data (when live=true)
-
-For real-time cards, fetch inside \`React.useEffect\` using the global \`fetch\`, with React.useState for {loading, error, data}. Use these reliable, key-free, CORS-enabled public APIs:
-
-- Crypto prices/history → CoinGecko: \`https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd\` and \`https://api.coingecko.com/api/v3/coins/bitcoin/market_chart?vs_currency=usd&days=7\`
-- Currency / FX rates → \`https://open.er-api.com/v6/latest/USD\`
-- Weather (no key) → geocode with \`https://geocoding-api.open-meteo.com/v1/search?name=London&count=1\` then \`https://api.open-meteo.com/v1/forecast?latitude=..&longitude=..&current=temperature_2m,weather_code&daily=temperature_2m_max,temperature_2m_min&timezone=auto\`
-
-Always render a loading state first, catch fetch errors into an error state, and show a clear fallback. If a needed live source is not in this list (e.g. specific equities/news), use the injected search results or AI knowledge as a clearly-labeled snapshot and set live=false.
-
 ## Data Integrity
 
-Use injected live search results as the PRIMARY source when present. Never fabricate specific prices/statistics without a source — either fetch them live, use provided search data, or state in the summary that the figure is approximate.
+Prefer live bindings and injected search results over memory. Never fabricate specific prices/statistics without a source — bind them live, use provided search data, or mark the figure approximate in the summary.
 
 ## Quality Bar
 
-Visually rich (gradients, accents, inline SVG charts), information-dense, responsive to the card size, interactive where it helps (toggles, inputs, expandable rows), and error-safe. Match the visualization to the data — a price needs a chart, a comparison needs a table, a status needs a KPI.`;
+Visually rich (gradients, accents, inline SVG charts), information-dense, responsive to card size, interactive where it helps, and error-safe. Match the visualization to the data — a price needs a chart, a comparison a table, a status a KPI, a place a map/photo.`;
 
 /* ─── APP ─── */
 const ENV_SOURCES = {
@@ -123,13 +138,14 @@ export default function App() {
   const [openAIKey, setOpenAIKey] = useState(() => envOrStorage(import.meta.env.VITE_OPENAI_KEY, 'agntdash_openai_key'));
   const [openAIBaseUrl, setOpenAIBaseUrl] = useState(() => envOrStorage(import.meta.env.VITE_OPENAI_BASE_URL, 'agntdash_openai_base_url', 'https://api.openai.com/v1'));
   const [openCodeKey, setOpenCodeKey] = useState(() => envOrStorage(import.meta.env.VITE_OPENCODE_KEY, 'agntdash_opencode_key'));
-  const [openCodeBaseUrl, setOpenCodeBaseUrl] = useState(() => envOrStorage(import.meta.env.VITE_OPENCODE_BASE_URL, 'agntdash_opencode_base_url', 'https://api.opencode.go/v1'));
+  const [openCodeBaseUrl, setOpenCodeBaseUrl] = useState(() => envOrStorage(import.meta.env.VITE_OPENCODE_BASE_URL, 'agntdash_opencode_base_url', ''));
   const [tavilyKey, setTavilyKey] = useState(() => envOrStorage(import.meta.env.VITE_TAVILY_KEY, 'agntdash_tavily_key'));
   const [modelFast, setModelFast] = useState(() => envOrStorage(import.meta.env.VITE_MODEL_FAST, 'agntdash_model_fast', DEFAULT_MODELS_FAST[0]));
   const [modelSmart, setModelSmart] = useState(() => envOrStorage(import.meta.env.VITE_MODEL_SMART, 'agntdash_model_smart', DEFAULT_MODELS_SMART[0]));
 
   const [cards, setCards] = useState(() => load('agntdash_cards_v4', DEFAULT_CARDS));
   const [groups, setGroups] = useState(() => load('agntdash_groups_v2', DEFAULT_GROUPS));
+  const [templates, setTemplates] = useState(() => load('agntdash_templates_v1', []));
   const [workflowConfig, setWorkflowConfig] = useState(() => ({ ...DEFAULT_WORKFLOW_CONFIG, ...load('agntdash_workflow_config', {}) }));
 
   const [consolePrompt, setConsolePrompt] = useState('');
@@ -150,6 +166,7 @@ export default function App() {
 
   useEffect(() => { localStorage.setItem('agntdash_cards_v4', JSON.stringify(cards)); }, [cards]);
   useEffect(() => { localStorage.setItem('agntdash_groups_v2', JSON.stringify(groups)); }, [groups]);
+  useEffect(() => { localStorage.setItem('agntdash_templates_v1', JSON.stringify(templates)); }, [templates]);
   useEffect(() => { localStorage.setItem('agntdash_workflow_config', JSON.stringify(workflowConfig)); }, [workflowConfig]);
 
   useEffect(() => {
@@ -158,7 +175,7 @@ export default function App() {
       const { cardId, startCols, startRows, startX, startY } = resizeRef.current;
       const newCols = Math.max(2, Math.min(12, startCols + Math.round((e.clientX - startX) / 100)));
       const newRows = Math.max(1, Math.min(8, startRows + Math.round((e.clientY - startY) / 140)));
-      setCards(prev => prev.map(c => c.id === cardId ? { ...c, cols: newCols, rows: newRows } : c));
+      setCards(prev => prev.map(c => c.id === cardId ? { ...c, cols: newCols, rows: newRows, sizeLocked: true } : c));
     };
     resizeUpRef.current = () => {
       resizeRef.current = null;
@@ -221,16 +238,21 @@ export default function App() {
     });
   };
 
-  /* ─── STAGE 0: DASHBOARD PLANNER (one prompt → one or many coordinated cards) ─── */
+  /* ─── STAGE 0: DASHBOARD PLANNER (one prompt → a coordinated set of cards) ─── */
+  // Returns { cards:[{prompt,group,title,size}], plan:{theme,palette,note} }. The
+  // plan is shared design context passed into every card so the set is coherent
+  // (shared palette, complementary sizes) instead of N unrelated boxes.
   const runDashboardPlanner = async (promptText) => {
-    const single = [{ prompt: promptText, group: null, title: null }];
+    const single = { cards: [{ prompt: promptText, group: null, title: null, size: null }], plan: null };
     if (!workflowConfig.orchestrate) return single;
     const max = Math.max(1, Math.min(12, workflowConfig.maxCards || 6));
     try {
       const res = await callLLM(modelFast, [
-        { role:'system', content:`You are a dashboard architect. Given a user request, decide how many dashboard cards best answer it and what each should show. A focused request ("Bitcoin price this week") is ONE card. A broad request ("set up my finance dashboard", "everything about Tokyo", "my morning briefing") becomes SEVERAL focused cards. Respond with ONLY JSON (no markdown): {"cards":[{"prompt":"self-contained prompt for a single card","group":"Finance|Personal|Work or a short new group name","title":"3-5 word label"}]}. Each prompt must stand alone (it will be generated independently). Return between 1 and ${max} cards. Prefer 1 unless the request clearly spans distinct data or visuals.` },
+        { role:'system', content:`You are a dashboard architect. Given a user request, design a COHERENT set of cards that together answer it. A focused request ("Bitcoin price this week") is ONE card. A broad request ("set up my finance dashboard", "everything about Tokyo", "my morning briefing") becomes SEVERAL complementary cards that share a visual language and don't overlap. Respond with ONLY JSON (no markdown):
+{"theme":"one phrase describing the dashboard","palette":["#hex","#hex","#hex"],"cards":[{"prompt":"self-contained prompt for one card, including the representation you intend (e.g. 'as a line chart')","group":"Finance|Personal|Work or a short new group name","title":"3-5 word label","size":"hint like '4x2' or '12x3'"}]}
+Rules: 1–${max} cards. Prefer 1 unless the request clearly spans distinct data/visuals. Give complementary sizes (mix big focal cards with small stat cards) so they tile well. No duplicate cards. The palette is a shared accent set every card should draw from.` },
         { role:'user', content: promptText }
-      ], 0.2, 1500);
+      ], 0.2, 1800);
       if (!res.ok) return single;
       const j = await res.json();
       const parsed = extractJSON(j.choices?.[0]?.message?.content || '');
@@ -238,16 +260,28 @@ export default function App() {
       const cleaned = list
         .filter(c => c && typeof c.prompt === 'string' && c.prompt.trim())
         .slice(0, max)
-        .map(c => ({ prompt: c.prompt.trim(), group: (c.group || '').trim() || null, title: (c.title || '').trim() || null }));
-      return cleaned.length ? cleaned : single;
+        .map(c => ({ prompt: c.prompt.trim(), group: (c.group || '').trim() || null, title: (c.title || '').trim() || null, size: (c.size || '').trim() || null }));
+      if (!cleaned.length) return single;
+      const palette = Array.isArray(parsed.palette) ? parsed.palette.filter(p => typeof p === 'string').slice(0, 5) : [];
+      const plan = { theme: (parsed.theme || '').toString().slice(0, 120), palette, cards: cleaned };
+      return { cards: cleaned, plan: cleaned.length > 1 ? plan : null };
     } catch (e) {
       console.warn('Planner failed, falling back to single card:', e.message);
       return single;
     }
   };
 
+  // Build a short shared-context block injected into each card's generation so the
+  // set coheres (shared palette + awareness of sibling cards).
+  const buildPlanContext = (plan, selfPrompt) => {
+    if (!plan) return '';
+    const siblings = (plan.cards || []).filter(c => c.prompt !== selfPrompt).map(c => `• ${c.title || c.prompt}`).join('\n');
+    const palette = plan.palette?.length ? `Shared accent palette (use these): ${plan.palette.join(', ')}.` : '';
+    return `\n\nDASHBOARD CONTEXT — this card is part of a coordinated dashboard${plan.theme ? ` ("${plan.theme}")` : ''}. ${palette}\nOther cards in this dashboard (do NOT duplicate them):\n${siblings || '• (none)'}\nKeep a consistent visual language with them.`;
+  };
+
   /* ─── AGENT PIPELINE (per-card) ─── */
-  const runAgentPipeline = async (promptText, existingCardId = null, forcedGroup = null) => {
+  const runAgentPipeline = async (promptText, existingCardId = null, forcedGroup = null, planContext = '') => {
     const { key } = getProviderConn();
     const getGroup = () => forcedGroup || (existingCardId ? (cards.find(c=>c.id===existingCardId)?.group || 'Personal') : 'Personal');
     const sizeToGrid = size => size==='xs'?{cols:3,rows:1}:size==='sm'?{cols:4,rows:2}:size==='md'?{cols:6,rows:2}:size==='lg'?{cols:6,rows:3}:{cols:12,rows:3};
@@ -300,9 +334,9 @@ export default function App() {
     // Stage 3: Code generation (smart model) — no response_format for max model compatibility
     const userPref = workflowConfig.userSystemPrompt?.trim();
     const sysContent = FIXED_SYSTEM_PROMPT + (userPref ? `\n\n---\n## User Preferences\n${userPref}` : '');
-    const userMsg = searchContext
+    const userMsg = (searchContext
       ? `User request: ${promptText}\n\nLive search results (use as primary data source):\n${searchContext}`
-      : `User request: ${promptText}`;
+      : `User request: ${promptText}`) + (planContext || '');
 
     // Helper: call Stage 3 and return parsed payload
     const callStage3 = async (messages) => {
@@ -353,20 +387,38 @@ export default function App() {
     const fallback = sizeToGrid(payload.size || 'md');
     const cols = clamp(payload.cols, 1, 12, fallback.cols);
     const rows = clamp(payload.rows, 1, 8, fallback.rows);
-    let refreshInterval = clamp(payload.refreshInterval, 0, 86400, 0);
-    if (refreshInterval > 0 && refreshInterval < 15) refreshInterval = 15; // floor to avoid hammering APIs
+
+    // Frame: agent-controlled chrome + bleed.
+    const chrome = ['full','minimal','none'].includes(payload.chrome) ? payload.chrome : 'full';
+    const bleed = !!payload.bleed;
+
+    // Data: host resolves declarative bindings (no fetching in model code). Merge any
+    // statically-embedded data with the freshly fetched values.
+    const dataBindings = Array.isArray(payload.dataBindings)
+      ? payload.dataBindings.filter(b => b && b.key && b.url).slice(0, 8)
+      : [];
+    const refreshInterval = bindingsRefreshInterval(dataBindings);
+    let liveData = {};
+    if (dataBindings.length) {
+      try { liveData = await resolveBindings(dataBindings); }
+      catch (e) { console.warn('[Agntdash] binding resolve failed:', e.message); }
+    }
+    const data = { ...(payload.data && typeof payload.data === 'object' ? payload.data : {}), ...liveData };
 
     return {
       id: existingCardId || Math.random().toString(36).slice(2,9),
       prompt: promptText,
       title: payload.title || 'AI Card',
       size: payload.size || (cols >= 12 ? 'xl' : cols >= 6 ? (rows >= 3 ? 'lg' : 'md') : rows >= 2 ? 'sm' : 'xs'),
-      dataSource: searchUsed ? `Tavily · ${payload.dataSource || 'Web Search'}` : (payload.dataSource || (payload.live ? 'Live API' : 'AI Knowledge')),
+      chrome, bleed,
+      dataSource: searchUsed ? `Tavily · ${payload.dataSource || 'Web Search'}` : (payload.dataSource || (dataBindings.length ? 'Live API' : 'AI Knowledge')),
       refreshInterval,
-      live: !!payload.live,
+      live: dataBindings.length > 0,
+      dataBindings,
       group: getGroup(),
       cols, rows,
-      data: payload.data,
+      sizeLocked: existingCardId ? (cards.find(c=>c.id===existingCardId)?.sizeLocked || false) : false,
+      data,
       renderSpec: payload.renderSpec || {},
       renderCode: check.ok ? payload.renderCode : (payload.renderCode || null),
       lastFetched: new Date().toISOString(),
@@ -390,12 +442,13 @@ export default function App() {
     if (workflowConfig.clearOnSubmit) setConsolePrompt('');
 
     try {
-      // Stage 0: planner decides whether this is one card or a coordinated set.
-      const plan = await runDashboardPlanner(promptText);
+      // Stage 0: planner decides whether this is one card or a coordinated set,
+      // and produces shared design context for the set.
+      const { cards: planCards, plan } = await runDashboardPlanner(promptText);
       const fallbackGroup = groups[0]?.name || 'Personal';
 
       // Create a placeholder per planned card so they fill in live and in parallel.
-      const planned = plan.map(p => ({
+      const planned = planCards.map(p => ({
         ...p,
         group: p.group || fallbackGroup,
         tempId: Math.random().toString(36).slice(2,9),
@@ -408,7 +461,7 @@ export default function App() {
 
       await Promise.all(planned.map(async (p) => {
         try {
-          const card = await runAgentPipeline(p.prompt, null, p.group);
+          const card = await runAgentPipeline(p.prompt, null, p.group, buildPlanContext(plan, p.prompt));
           setCards(prev => prev.map(c => c.id===p.tempId ? {...card, id:p.tempId} : c));
         } catch (err) {
           setCards(prev => prev.map(c => c.id===p.tempId ? {...c, title:'Error', loading:false, error:err.message||'Pipeline failed. Check API keys.'} : c));
@@ -419,7 +472,22 @@ export default function App() {
     } finally { setIsConsoleSubmitting(false); }
   };
 
-  const handleRefreshCard = async (cardId) => {
+  /* ─── DATA REFRESH: refetch a card's bindings only (no LLM, no code change) ─── */
+  const handleRefreshData = async (cardId) => {
+    const card = cards.find(c => c.id===cardId);
+    if (!card || card.isCreating || !card.dataBindings?.length) return;
+    try {
+      const liveData = await resolveBindings(card.dataBindings);
+      setCards(prev => prev.map(c => c.id===cardId
+        ? { ...c, data: { ...(c.data || {}), ...liveData }, lastFetched: new Date().toISOString() }
+        : c));
+    } catch (err) {
+      console.warn('[Agntdash] data refresh failed:', err.message);
+    }
+  };
+
+  /* ─── REGENERATE: re-run the full pipeline (new code + data) ─── */
+  const handleRegenerateCard = async (cardId) => {
     const card = cards.find(c => c.id===cardId);
     if (!card || card.isCreating) return;
     setCards(prev => prev.map(c => c.id===cardId ? {...c, loading:true, error:null} : c));
@@ -428,6 +496,85 @@ export default function App() {
       setCards(prev => prev.map(c => c.id===cardId ? updated : c));
     } catch (err) {
       setCards(prev => prev.map(c => c.id===cardId ? {...c, loading:false, error:err.message || 'Unknown error'} : c));
+    }
+  };
+
+  /* Manual "Refresh" = data refetch when the card has bindings, else regenerate. */
+  const handleRefreshCard = (cardId) => {
+    const card = cards.find(c => c.id===cardId);
+    if (card?.dataBindings?.length) return handleRefreshData(cardId);
+    return handleRegenerateCard(cardId);
+  };
+
+  const handleDuplicateCard = (cardId) => {
+    const card = cards.find(c => c.id===cardId);
+    if (!card) return;
+    const copy = { ...card, id: Math.random().toString(36).slice(2,9), title: `${card.title} (copy)`, lastFetched: new Date().toISOString() };
+    setCards(prev => { const i = prev.findIndex(c => c.id===cardId); const next=[...prev]; next.splice(i+1, 0, copy); return next; });
+  };
+
+  const handleToggleSizeLock = (cardId) =>
+    setCards(prev => prev.map(c => c.id===cardId ? {...c, sizeLocked: !c.sizeLocked} : c));
+
+  const handleSaveTemplate = (cardId) => {
+    const card = cards.find(c => c.id===cardId);
+    if (!card) return;
+    const name = window.prompt('Template name:', card.title);
+    if (!name?.trim()) return;
+    const tpl = {
+      id: Math.random().toString(36).slice(2,9), name: name.trim(),
+      prompt: card.prompt, title: card.title, cols: card.cols, rows: card.rows,
+      chrome: card.chrome, bleed: card.bleed, dataBindings: card.dataBindings || [],
+      data: card.data, renderSpec: card.renderSpec, renderCode: card.renderCode,
+    };
+    setTemplates(prev => [...prev, tpl]);
+  };
+
+  const handleUseTemplate = (tplId, groupName) => {
+    const tpl = templates.find(t => t.id===tplId);
+    if (!tpl) return;
+    const group = groupName || groups[0]?.name || 'Personal';
+    const card = {
+      id: Math.random().toString(36).slice(2,9), prompt: tpl.prompt, title: tpl.title,
+      cols: tpl.cols, rows: tpl.rows, chrome: tpl.chrome, bleed: tpl.bleed,
+      dataBindings: tpl.dataBindings || [], refreshInterval: bindingsRefreshInterval(tpl.dataBindings || []),
+      live: (tpl.dataBindings || []).length > 0, group, data: tpl.data, renderSpec: tpl.renderSpec,
+      renderCode: tpl.renderCode, dataSource: 'Template', lastFetched: new Date().toISOString(),
+      loading: false, error: null, sizeLocked: false,
+    };
+    setCards(prev => [...prev, card]);
+    if ((tpl.dataBindings || []).length) setTimeout(() => handleRefreshData(card.id), 50);
+  };
+
+  const handleDeleteTemplate = (tplId) => setTemplates(prev => prev.filter(t => t.id !== tplId));
+
+  /* ─── EXPORT / IMPORT: dashboards are portable JSON (no lock-in, no data loss) ─── */
+  const handleExportDashboard = () => {
+    const payload = { app: 'agntdash', version: 1, exportedAt: new Date().toISOString(), cards, groups, templates, workflowConfig };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `agntdash-${new Date().toISOString().slice(0,10)}.json`;
+    a.click(); URL.revokeObjectURL(url);
+  };
+
+  const handleImportDashboard = async (file) => {
+    if (!file) return;
+    try {
+      const parsed = JSON.parse(await file.text());
+      if (parsed.app !== 'agntdash' || !Array.isArray(parsed.cards)) throw new Error('Not an Agntdash export');
+      const mode = window.confirm('Import: OK = replace current dashboard, Cancel = merge into it.');
+      if (mode) { // replace
+        setCards(parsed.cards); setGroups(parsed.groups || groups);
+        if (Array.isArray(parsed.templates)) setTemplates(parsed.templates);
+      } else { // merge (re-id imported cards to avoid collisions)
+        const reid = parsed.cards.map(c => ({ ...c, id: Math.random().toString(36).slice(2,9) }));
+        setGroups(prev => { const names = new Set(prev.map(g=>g.name.toLowerCase())); const add=(parsed.groups||[]).filter(g=>!names.has(g.name.toLowerCase())); return [...prev, ...add]; });
+        setCards(prev => [...prev, ...reid]);
+        if (Array.isArray(parsed.templates)) setTemplates(prev => [...prev, ...parsed.templates.map(t => ({ ...t, id: Math.random().toString(36).slice(2,9) }))]);
+      }
+    } catch (err) {
+      window.alert(`Import failed: ${err.message}`);
     }
   };
 
@@ -453,14 +600,16 @@ export default function App() {
     }
   };
 
-  /* ─── AUTO-REFRESH: drive live cards on their refreshInterval ─── */
-  const refreshRef = useRef(handleRefreshCard);
-  refreshRef.current = handleRefreshCard;
-  const liveSignature = cards.map(c => `${c.id}:${c.refreshInterval||0}:${c.loading?1:0}:${c.error?1:0}:${c.isCreating?1:0}`).join('|');
+  /* ─── AUTO-REFRESH: refetch live cards' DATA on their refreshInterval ─── */
+  // Critically, this refetches data only — it never re-runs the LLM or rewrites the
+  // component, so a live card stays visually stable and costs ~nothing per tick.
+  const refreshDataRef = useRef(handleRefreshData);
+  refreshDataRef.current = handleRefreshData;
+  const liveSignature = cards.map(c => `${c.id}:${c.refreshInterval||0}:${(c.dataBindings?.length||0)}:${c.isCreating?1:0}`).join('|');
   useEffect(() => {
-    const live = cards.filter(c => c.refreshInterval > 0 && !c.loading && !c.error && !c.isCreating);
+    const live = cards.filter(c => c.refreshInterval > 0 && c.dataBindings?.length && !c.isCreating);
     if (!live.length) return;
-    const timers = live.map(c => setInterval(() => refreshRef.current(c.id), c.refreshInterval * 1000));
+    const timers = live.map(c => setInterval(() => refreshDataRef.current(c.id), c.refreshInterval * 1000));
     return () => timers.forEach(clearInterval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [liveSignature]);
@@ -538,6 +687,10 @@ export default function App() {
 
   const handlers = {
     onRefresh: handleRefreshCard,
+    onRegenerate: handleRegenerateCard,
+    onDuplicate: handleDuplicateCard,
+    onSaveTemplate: handleSaveTemplate,
+    onToggleSizeLock: handleToggleSizeLock,
     onRepair: handleRepairCard,
     onDelete: handleDeleteCard,
     onMove: handleMoveCardGroup,
@@ -584,6 +737,11 @@ export default function App() {
           draggingCardId={draggingCardId}
           handlers={handlers}
           samplePrompts={SAMPLE_PROMPTS}
+          templates={templates}
+          onUseTemplate={handleUseTemplate}
+          onDeleteTemplate={handleDeleteTemplate}
+          onExport={handleExportDashboard}
+          onImport={handleImportDashboard}
         />
       )}
 

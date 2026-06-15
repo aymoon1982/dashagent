@@ -55,30 +55,91 @@ function CardWrapper({ card, group, groups, handlers, isEditing, editPromptValue
     return () => document.removeEventListener('mousedown', close);
   }, [menuOpen]);
 
-  // Content-driven sizing: grow the card to fit its rendered content (never shrink
-  // below the model's chosen rows). Re-measures shortly after render to catch
-  // async/live data. Capped at 8 rows.
+  // Content-driven sizing: continuously fit the card to its rendered content via
+  // ResizeObserver + MutationObserver (catches async/live data, fonts, images).
+  // Resets to the model's rows whenever the code or data changes — so a card that
+  // had more data and now has less doesn't stay permanently oversized. Grows from
+  // the model's rows up to the cap; respects a manual size lock.
   useEffect(() => {
     setAutoRows(card.rows);
-    if (!workflowConfig?.autoFitHeight || card.isCreating || card.loading || card.error || isEditing) return;
-    const ROW = 82, CHROME = 96, MAX = 8;
-    let raf, t1, t2;
+    if (!workflowConfig?.autoFitHeight || card.sizeLocked || card.isCreating || card.loading || card.error || isEditing) return;
+    const ROW = 82, MAX = 8;
+    let frame;
+    // Grow only to eliminate real overflow. This converges (each grow shrinks the
+    // overflow to zero) and leaves height-filling components alone (they never
+    // overflow), avoiding the runaway-growth problem of measuring raw scrollHeight.
     const measure = () => {
-      const bd = bodyRef.current;
-      const content = bd?.querySelector('.card-bd')?.firstElementChild;
-      if (!content) return;
-      const needed = Math.ceil((content.scrollHeight + CHROME) / ROW);
-      setAutoRows(prev => Math.max(card.rows, Math.min(MAX, Math.max(prev, needed))));
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const content = bodyRef.current?.querySelector('.card-bd')?.firstElementChild;
+        if (!content) return;
+        const overflow = content.scrollHeight - content.clientHeight;
+        if (overflow > 6) {
+          const extra = Math.ceil(overflow / ROW);
+          setAutoRows(prev => Math.min(MAX, prev + extra));
+        }
+      });
     };
-    raf = requestAnimationFrame(measure);
-    t1 = setTimeout(measure, 400);
-    t2 = setTimeout(measure, 1200);
-    return () => { cancelAnimationFrame(raf); clearTimeout(t1); clearTimeout(t2); };
-  }, [card.rows, card.renderCode, card.loading, card.error, card.isCreating, isEditing, workflowConfig?.autoFitHeight]);
+    const target = bodyRef.current?.querySelector('.card-bd');
+    if (!target) return;
+    const ro = new ResizeObserver(measure);
+    const mo = new MutationObserver(measure);
+    ro.observe(target);
+    if (target.firstElementChild) ro.observe(target.firstElementChild);
+    mo.observe(target, { childList: true, subtree: true, characterData: true });
+    measure();
+    const t = setTimeout(measure, 600);
+    return () => { cancelAnimationFrame(frame); ro.disconnect(); mo.disconnect(); clearTimeout(t); };
+  }, [card.rows, card.renderCode, card.lastFetched, card.loading, card.error, card.isCreating, card.sizeLocked, isEditing, workflowConfig?.autoFitHeight]);
 
   const color = group?.color || '#6366f1';
   const accent = card.renderSpec?.color || color;
   const accentBg = accent + '22';
+
+  // Agent-controlled chrome. During loading/error/creating we force full chrome so
+  // status is always visible; a finished card honors its chosen mode.
+  const transient = card.isCreating || card.loading || card.error;
+  const chromeMode = transient ? 'full' : (card.chrome || 'full');
+  const showHeader = chromeMode === 'full' || chromeMode === 'minimal';
+  const showFooter = chromeMode === 'full' && !card.isCreating;
+  const showAccent = chromeMode === 'full';
+  const bleed = !!card.bleed && !transient;
+
+  const menuEl = !card.isCreating && (
+    <div className="card-menu-wrap" ref={menuRef}>
+      <button className="card-menu-btn" onClick={() => setMenuOpen(o => !o)}>
+        <span className="material-symbols-outlined">more_horiz</span>
+      </button>
+      {menuOpen && (
+        <div className="card-dropdown">
+          {card.dataBindings?.length > 0 && (
+            <div className="dd-item" onClick={() => { handlers.onRefresh(card.id); setMenuOpen(false); }}>
+              <span className="material-symbols-outlined">refresh</span> Refresh data
+            </div>
+          )}
+          <div className="dd-item" onClick={() => { handlers.onRegenerate(card.id); setMenuOpen(false); }}>
+            <span className="material-symbols-outlined">autorenew</span> Regenerate
+          </div>
+          <div className="dd-item" onClick={() => { handlers.onDuplicate(card.id); setMenuOpen(false); }}>
+            <span className="material-symbols-outlined">content_copy</span> Duplicate
+          </div>
+          <div className="dd-item" onClick={() => { handlers.onStartEdit(card); setMenuOpen(false); }}>
+            <span className="material-symbols-outlined">edit</span> Edit Prompt
+          </div>
+          <div className="dd-item" onClick={() => { handlers.onSaveTemplate(card.id); setMenuOpen(false); }}>
+            <span className="material-symbols-outlined">bookmark_add</span> Save as Template
+          </div>
+          {card.sizeLocked
+            ? <div className="dd-item" onClick={() => { handlers.onToggleSizeLock(card.id); setMenuOpen(false); }}><span className="material-symbols-outlined">aspect_ratio</span> Auto-size</div>
+            : null}
+          <div className="dd-sep" />
+          <div className="dd-item danger" onClick={() => { handlers.onDelete(card.id); setMenuOpen(false); }}>
+            <span className="material-symbols-outlined">delete</span> Delete Card
+          </div>
+        </div>
+      )}
+    </div>
+  );
 
   return (
     <div
@@ -94,66 +155,50 @@ function CardWrapper({ card, group, groups, handlers, isEditing, editPromptValue
 
         {/* ── FRONT FACE ── */}
         <div className="card-face-front">
-          <div className="card-top-accent" style={{ background: `linear-gradient(90deg, ${color}, ${color}55)` }} />
+          {showAccent && <div className="card-top-accent" style={{ background: `linear-gradient(90deg, ${color}, ${color}55)` }} />}
 
-          <div className="card-hd">
-            <div className="card-type-ico" style={{ background: accentBg }}>
-              <span className="material-symbols-outlined" style={{ color: accent }}>
-                {card.isCreating ? 'edit_note' : (card.renderCode ? 'code_blocks' : 'dashboard')}
-              </span>
-            </div>
-            <div className="card-meta">
-              <div className="card-title">{card.isCreating ? 'New Card' : card.title}</div>
-              <div className="card-sub">
-                {card.isCreating ? 'Describe what to display' :
-                 card.loading ? 'Analyzing intent…' :
-                 `${card.dataSource || ''}${card.lastFetched ? ` · ${new Date(card.lastFetched).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}` : ''}`}
+          {showHeader ? (
+            <div className="card-hd">
+              <div className="card-type-ico" style={{ background: accentBg }}>
+                <span className="material-symbols-outlined" style={{ color: accent }}>
+                  {card.isCreating ? 'edit_note' : (card.renderCode ? 'code_blocks' : 'dashboard')}
+                </span>
               </div>
-            </div>
-
-            {!card.isCreating && !card.loading && !card.error && (
-              <select className="group-sel" value={card.group} onChange={e => handlers.onMove(card.id, e.target.value)} title="Move to group">
-                {groups.map(g => <option key={g.name} value={g.name}>📁 {g.name}</option>)}
-              </select>
-            )}
-
-            {!card.isCreating && (
-              <div className="card-menu-wrap" ref={menuRef}>
-                <button className="card-menu-btn" onClick={() => setMenuOpen(o => !o)}>
-                  <span className="material-symbols-outlined">more_horiz</span>
-                </button>
-                {menuOpen && (
-                  <div className="card-dropdown">
-                    <div className="dd-item" onClick={() => { handlers.onRefresh(card.id); setMenuOpen(false); }}>
-                      <span className="material-symbols-outlined">refresh</span> Refresh
-                    </div>
-                    <div className="dd-item" onClick={() => { handlers.onStartEdit(card); setMenuOpen(false); }}>
-                      <span className="material-symbols-outlined">edit</span> Edit Prompt
-                    </div>
-                    <div className="dd-sep" />
-                    <div className="dd-item danger" onClick={() => { handlers.onDelete(card.id); setMenuOpen(false); }}>
-                      <span className="material-symbols-outlined">delete</span> Delete Card
-                    </div>
-                  </div>
-                )}
+              <div className="card-meta">
+                <div className="card-title">{card.isCreating ? 'New Card' : card.title}</div>
+                <div className="card-sub">
+                  {card.isCreating ? 'Describe what to display' :
+                   card.loading ? 'Analyzing intent…' :
+                   `${card.dataSource || ''}${card.lastFetched ? ` · ${new Date(card.lastFetched).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}` : ''}`}
+                </div>
               </div>
-            )}
-          </div>
 
-          <div className="card-bd">
+              {chromeMode === 'full' && !card.isCreating && !card.loading && !card.error && (
+                <select className="group-sel" value={card.group} onChange={e => handlers.onMove(card.id, e.target.value)} title="Move to group">
+                  {groups.map(g => <option key={g.name} value={g.name}>📁 {g.name}</option>)}
+                </select>
+              )}
+
+              {menuEl}
+            </div>
+          ) : (
+            <div className="card-float-menu">{menuEl}</div>
+          )}
+
+          <div className={`card-bd${bleed ? ' card-bd--bleed' : ''}`}>
             {card.isCreating
               ? <InlineCardCreator card={card} onGenerate={handlers.onGenerate} onCancel={handlers.onCancel} />
-              : <CardBody card={card} onRetry={() => handlers.onRefresh(card.id)} onRepair={(msg) => handlers.onRepair(card.id, msg)} />
+              : <CardBody card={card} onRetry={() => handlers.onRegenerate(card.id)} onRepair={(msg) => handlers.onRepair(card.id, msg)} />
             }
           </div>
 
-          {!card.isCreating && (
+          {showFooter && (
             <div className="card-ft" onClick={() => handlers.onStartEdit(card)}>
               <span className="material-symbols-outlined" style={{ fontSize:11, color:'var(--fg-dim)', flexShrink:0 }}>edit</span>
               <span className="prompt-echo" title={card.prompt}>"{card.prompt}"</span>
               <div className="card-badges">
                 {card.renderCode && <span className="badge">ai</span>}
-                <span className="badge">{card.size}</span>
+                <span className="badge">{card.cols}×{card.rows}</span>
                 {card.refreshInterval > 0 && <span className="badge live">live</span>}
               </div>
             </div>
@@ -222,7 +267,12 @@ function CardWrapper({ card, group, groups, handlers, isEditing, editPromptValue
 function GroupSection({ group, cards, groups, handlers, editingCardId, editPromptValue, setEditPromptValue, draggingCardId, workflowConfig, setGroups }) {
   const [editingName, setEditingName] = useState(false);
   const [nameVal, setNameVal] = useState(group.name);
+  const sortOrder = workflowConfig?.defaultSortOrder || 'none';
   const groupCards = cards.filter(c => c.group === group.name);
+  if (sortOrder !== 'none') {
+    const area = c => (c.cols || 6) * (c.rows || 2);
+    groupCards.sort((a, b) => sortOrder === 'size-desc' ? area(b) - area(a) : area(a) - area(b));
+  }
 
   const saveName = () => {
     const val = nameVal.trim();
@@ -272,7 +322,7 @@ function GroupSection({ group, cards, groups, handlers, editingCardId, editPromp
       </div>
 
       {!group.collapsed && (
-        <div className="cards-grid" style={{ gridAutoFlow: workflowConfig.densePacking ? 'dense' : 'row' }}>
+        <div className="cards-grid" style={{ gridAutoFlow: workflowConfig.densePacking ? 'dense' : 'row', '--card-gap': `${workflowConfig.gridSnapUnit || 8}px` }}>
           {groupCards.length === 0 && (
             <div className="group-empty">
               <span className="material-symbols-outlined" style={{ fontSize:18 }}>dashboard_customize</span>
@@ -300,8 +350,10 @@ function GroupSection({ group, cards, groups, handlers, editingCardId, editPromp
 }
 
 /* ─── DASHBOARD VIEW ─── */
-export function DashboardView({ cards, groups, setGroups, isApiConnected, workflowConfig, consolePrompt, setConsolePrompt, isConsoleSubmitting, onAddCard, editingCardId, editPromptValue, setEditPromptValue, draggingCardId, handlers, samplePrompts }) {
+export function DashboardView({ cards, groups, setGroups, isApiConnected, workflowConfig, consolePrompt, setConsolePrompt, isConsoleSubmitting, onAddCard, editingCardId, editPromptValue, setEditPromptValue, draggingCardId, handlers, samplePrompts, templates = [], onUseTemplate, onDeleteTemplate, onExport, onImport }) {
   const totalCards = cards.length;
+  const fileRef = useRef(null);
+  const firstGroup = groups[0]?.name || 'Personal';
 
   return (
     <div>
@@ -313,6 +365,30 @@ export function DashboardView({ cards, groups, setGroups, isApiConnected, workfl
         workflowConfig={workflowConfig}
         samplePrompts={samplePrompts}
       />
+
+      <div className="dash-toolbar">
+        <div className="dash-tpl-row">
+          {templates.length > 0 && <span className="dash-tpl-label">TEMPLATES</span>}
+          {templates.map(t => (
+            <span key={t.id} className="tpl-chip">
+              <button className="tpl-chip-use" onClick={() => onUseTemplate(t.id, firstGroup)} title="Add this template to your dashboard">
+                <span className="material-symbols-outlined">bookmark</span> {t.name}
+              </button>
+              <button className="tpl-chip-del" onClick={() => onDeleteTemplate(t.id)} title="Delete template">×</button>
+            </span>
+          ))}
+        </div>
+        <div className="dash-io-row">
+          <button className="btn btn-secondary btn-sm" onClick={onExport} title="Export dashboard as JSON">
+            <span className="material-symbols-outlined">download</span><span className="prompt-btn-label"> Export</span>
+          </button>
+          <button className="btn btn-secondary btn-sm" onClick={() => fileRef.current?.click()} title="Import a dashboard JSON">
+            <span className="material-symbols-outlined">upload</span><span className="prompt-btn-label"> Import</span>
+          </button>
+          <input ref={fileRef} type="file" accept="application/json" style={{ display:'none' }}
+            onChange={e => { const f = e.target.files?.[0]; if (f) onImport(f); e.target.value=''; }} />
+        </div>
+      </div>
 
       <div className="main-content fade-in">
         {!isApiConnected && (
