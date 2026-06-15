@@ -246,11 +246,23 @@ export const PROVIDERS = {
     desc: 'Sports scores/fixtures/standings. params: league (e.g. epl|nba), team (optional). Returns array',
     build: p => `/sports?league=${enc(p.league||'')}&team=${enc(p.team||'')}`, path: null,
   },
+
+  // ── Personal-data connectors (Task 4): need proxy + a connected account ──
+  my_calendar: {
+    viaProxy: true, needsAuth: true, refreshSec: 600,
+    desc: 'Your upcoming Google Calendar events. no params. Returns { items:[{summary,start,...}] }',
+    build: () => '/me/calendar?connector=google', path: null,
+  },
+  my_tasks: {
+    viaProxy: true, needsAuth: true, refreshSec: 600,
+    desc: 'Your Google Tasks. no params. Returns { items:[{title,status,due}] }',
+    build: () => '/me/tasks?connector=google', path: null,
+  },
 };
 
 // A compact, always-in-sync catalog injected into the agent prompt.
 export const PROVIDER_CATALOG = Object.entries(PROVIDERS)
-  .map(([id, p]) => `- ${id}${p.viaProxy ? ' (needs data proxy)' : ''}: ${p.desc}`).join('\n');
+  .map(([id, p]) => `- ${id}${p.needsAuth ? ' (needs connected account)' : p.viaProxy ? ' (needs data proxy)' : ''}: ${p.desc}`).join('\n');
 
 // Resolve a binding (provider or raw url) into { url, path, refreshSec }.
 function resolveBindingSpec(b) {

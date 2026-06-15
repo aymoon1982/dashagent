@@ -506,6 +506,21 @@ body {
 .dd-item .material-symbols-outlined { font-size: 13px; }
 .dd-sep { height: 1px; background: var(--border); margin: 3px 0; }
 
+/* Action confirmation modal */
+.action-confirm {
+  position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  z-index: 1000; width: min(440px, 92vw);
+  background: rgba(20,20,34,.98); border: 1px solid var(--border);
+  border-radius: 14px; padding: 16px; box-shadow: 0 20px 60px rgba(0,0,0,.5);
+}
+.action-confirm-hd { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; }
+.action-confirm-payload {
+  background: rgba(0,0,0,.3); border: 1px solid var(--border); border-radius: 8px;
+  padding: 8px; font-size: 11px; max-height: 200px; overflow: auto;
+  white-space: pre-wrap; word-break: break-all; color: var(--fg-muted);
+}
+.action-confirm-ft { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+
 /* Card Body */
 .card-bd {
   flex: 1;

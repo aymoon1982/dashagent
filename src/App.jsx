@@ -3,6 +3,7 @@ import { AppHeader, SettingsDrawer, PipelineView } from './UI.jsx';
 import { DashboardView } from './Dashboard.jsx';
 import { validateRenderCode } from './transpile.js';
 import { resolveBindings, bindingsRefreshInterval, ALLOWED_HOSTS, PROVIDER_CATALOG, setProxyBase } from './dataLayer.js';
+import { setActionDispatcher } from './actions.js';
 
 /* ─── CONSTANTS ─── */
 const DEFAULT_MODELS_FAST = ['google/gemini-2.5-flash','deepseek/deepseek-chat','meta-llama/llama-3.3-70b-instruct:free','openai/gpt-4o-mini','anthropic/claude-3-haiku'];
@@ -98,6 +99,7 @@ For data with NO provider/allowlisted source (specific equities like AAPL, paywa
 2. WRITE JSX (<div>, <svg>, <img>, <table>…). It is transpiled for you. Do NOT hand-write React.createElement.
 3. Hooks via \`React.useState/useEffect/useRef\` (\`React\` is in scope; no imports). \`fetch\` is available (allowlisted + auto-timeout) for option B. Storage/window/document are NOT available — keep components free of those.
    - PERSISTENCE: for ANY state the user should keep across reloads (checklist ticks, notes text, counters, toggles, selected tab), use \`useCardState(key, initial)\` instead of React.useState. Same API as useState ([value, setValue]) but it is saved with the card. Use plain React.useState only for ephemeral UI (hover, transient input).
+   - ACTIONS (write): if the card needs to perform an action (e.g. add a task, send something), call \`runAction(actionId, payload)\` — it returns a Promise and the host ALWAYS asks the user to confirm first. Only use it for genuine write intents; it no-ops without a configured proxy.
 4. No external libraries. Build charts with inline SVG. Images via <img src=…> are fine (e.g. flags, Wikimedia/Unsplash URLs returned in data).
 5. Inline styles only (\`style={{ }}\`); you may use the CSS variables below.
 6. Return ONE root element filling its container: root style \`{ height: '100%', display: 'flex', flexDirection: 'column' }\` (for bleed cards, also set margin/padding 0 and let media use width/height 100% with objectFit cover).
@@ -179,6 +181,26 @@ export default function App() {
   useEffect(() => { localStorage.setItem('agntdash_templates_v1', JSON.stringify(templates)); }, [templates]);
   useEffect(() => { localStorage.setItem('agntdash_models_by_provider', JSON.stringify(modelsByProvider)); }, [modelsByProvider]);
   useEffect(() => { setProxyBase(dataProxyUrl); }, [dataProxyUrl]);
+
+  // Action tools: a generated card's runAction() routes here, always confirmed by
+  // the user before the host POSTs it to the proxy's /actions endpoint.
+  const [actionRequest, setActionRequest] = useState(null); // { id, payload, resolve, reject }
+  useEffect(() => {
+    setActionDispatcher((id, payload) => new Promise((resolve, reject) => setActionRequest({ id, payload, resolve, reject })));
+    return () => setActionDispatcher(null);
+  }, []);
+  const confirmAction = async () => {
+    const req = actionRequest; setActionRequest(null);
+    if (!req) return;
+    if (!dataProxyUrl) { req.reject(new Error('No data proxy configured.')); return; }
+    try {
+      const res = await fetch(`${dataProxyUrl.replace(/\/$/, '')}/actions/${encodeURIComponent(req.id)}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(req.payload || {}),
+      });
+      req.resolve(await res.json());
+    } catch (err) { req.reject(err); }
+  };
+  const cancelAction = () => { if (actionRequest) { actionRequest.reject(new Error('cancelled')); setActionRequest(null); } };
   useEffect(() => { localStorage.setItem('agntdash_workflow_config', JSON.stringify(workflowConfig)); }, [workflowConfig]);
 
   useEffect(() => {
@@ -820,6 +842,28 @@ Rules: 1–${max} cards. Prefer 1 unless the request clearly spans distinct data
         envSources={ENV_SOURCES}
         onSave={saveSettings}
       />
+
+      {actionRequest && (
+        <div>
+          <div className="settings-overlay" onClick={cancelAction} />
+          <div className="action-confirm">
+            <div className="action-confirm-hd">
+              <span className="material-symbols-outlined" style={{ color:'var(--warning)' }}>bolt</span>
+              <div>
+                <div className="card-title">Confirm action</div>
+                <div className="card-sub">A card wants to run "{actionRequest.id}"</div>
+              </div>
+            </div>
+            <pre className="action-confirm-payload">{JSON.stringify(actionRequest.payload, null, 2)}</pre>
+            <div className="action-confirm-ft">
+              <button className="btn btn-secondary btn-sm" onClick={cancelAction}>Cancel</button>
+              <button className="btn btn-primary btn-sm" onClick={confirmAction}>
+                <span className="material-symbols-outlined">check</span> Run
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

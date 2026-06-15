@@ -19,6 +19,7 @@
  * to a serverless function (Vercel/Cloudflare) — each route is independent.
  */
 import http from 'node:http';
+import { authUrl, exchange, fetchResource, isConfigured } from './connectors.js';
 
 const PORT = process.env.PORT || 8787;
 const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || '*';
@@ -125,16 +126,45 @@ const ROUTES = {
   '/sports': sports,
 };
 
+const readBody = (req) => new Promise(resolve => { let b = ''; req.on('data', c => b += c); req.on('end', () => { try { resolve(JSON.parse(b || '{}')); } catch { resolve({}); } }); });
+
 http.createServer(async (req, res) => {
   if (req.method === 'OPTIONS') return json(res, 204, {});
   const u = new URL(req.url, `http://${req.headers.host}`);
-  if (u.pathname === '/health') return json(res, 200, { ok: true });
-  const handler = ROUTES[u.pathname];
-  if (!handler) return json(res, 404, { __error: 'unknown route' });
+  const path = u.pathname;
+  const params = Object.fromEntries(u.searchParams.entries());
+
   try {
-    const params = Object.fromEntries(u.searchParams.entries());
-    const data = await handler(params);
-    return json(res, 200, data);
+    if (path === '/health') return json(res, 200, { ok: true });
+
+    // ── Personal-data connectors (Task 4, scaffold) ──
+    if (path.startsWith('/connect/')) {
+      const c = path.slice('/connect/'.length);
+      if (!isConfigured(c)) return json(res, 200, { __error: `connector ${c} not configured on the proxy` });
+      res.writeHead(302, { Location: authUrl(c) }); return res.end();
+    }
+    if (path === '/oauth/callback') {
+      const r = await exchange(params.state, params.code);
+      res.writeHead(200, { 'Content-Type': 'text/html' });
+      return res.end(r.access_token ? '<h3>Connected. You can close this tab.</h3>' : `<h3>Connection failed: ${r.error || 'unknown'}</h3>`);
+    }
+    if (path.startsWith('/me/')) {
+      return json(res, 200, await fetchResource(params.connector || 'google', path.slice('/me/'.length)));
+    }
+
+    // ── Action tools (Task 5): execute a confirmed write action ──
+    if (path.startsWith('/actions/') && req.method === 'POST') {
+      const id = path.slice('/actions/'.length);
+      const payload = await readBody(req);
+      // SAFE DEFAULT: echo only. Wire real side effects (via connectors) here,
+      // behind explicit per-action allowlisting + auth, after a security review.
+      return json(res, 200, { ok: true, simulated: true, action: id, payload });
+    }
+
+    // ── Keyless data routes ──
+    const handler = ROUTES[path];
+    if (!handler) return json(res, 404, { __error: 'unknown route' });
+    return json(res, 200, await handler(params));
   } catch (err) {
     return json(res, 200, { __error: `proxy error: ${err.message}` });
   }
