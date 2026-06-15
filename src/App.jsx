@@ -289,7 +289,10 @@ Rules: 1–${max} cards. Prefer 1 unless the request clearly spans distinct data
   };
 
   /* ─── AGENT PIPELINE (per-card) ─── */
-  const runAgentPipeline = async (promptText, existingCardId = null, forcedGroup = null, planContext = '') => {
+  // refine: optional { instruction, prior } — when set, this is a stateful EDIT of
+  // an existing card (the model sees the prior card JSON and tweaks it) rather than
+  // a cold regeneration, so "make it bigger" / "add ETH" work incrementally.
+  const runAgentPipeline = async (promptText, existingCardId = null, forcedGroup = null, planContext = '', refine = null) => {
     const { key } = getProviderConn();
     const getGroup = () => forcedGroup || (existingCardId ? (cards.find(c=>c.id===existingCardId)?.group || 'Personal') : 'Personal');
     const sizeToGrid = size => size==='xs'?{cols:3,rows:1}:size==='sm'?{cols:4,rows:2}:size==='md'?{cols:6,rows:2}:size==='lg'?{cols:6,rows:3}:{cols:12,rows:3};
@@ -298,9 +301,9 @@ Rules: 1–${max} cards. Prefer 1 unless the request clearly spans distinct data
 
     if (!key) throw new Error('No API key configured. Open Settings to connect an LLM provider.');
 
-    // Stage 1: Intent analysis — does this prompt need live web search?
+    // Stage 1: Intent analysis — does this prompt need live web search? (skipped on refine)
     let intent = { needs_search: false, search_query: promptText };
-    try {
+    if (!refine) try {
       const ir = await llm(modelFast, [
         { role:'system', content:'You analyze dashboard prompts. Respond with ONLY a JSON object (no markdown): {"needs_search":true/false,"search_query":"concise search query"}. needs_search=true for: live prices, today\'s news, current weather, sports scores, recent exchange rates, any real-time data. needs_search=false for: math, conversions, countdowns, static checklists, general knowledge charts.' },
         { role:'user', content: promptText }
@@ -365,7 +368,14 @@ Rules: 1–${max} cards. Prefer 1 unless the request clearly spans distinct data
       return extractJSON(content);
     };
 
-    const baseMessages = [{role:'system',content:sysContent},{role:'user',content:userMsg}];
+    const baseMessages = refine
+      ? [
+          { role:'system', content: sysContent },
+          { role:'user', content: `Existing card for the request: ${promptText}` },
+          { role:'assistant', content: JSON.stringify(refine.prior || {}) },
+          { role:'user', content: `Modify this card per the instruction and return the COMPLETE updated JSON object (same schema). Keep everything that still applies; change only what the instruction asks.\n\nInstruction: ${refine.instruction}` },
+        ]
+      : [{ role:'system', content: sysContent }, { role:'user', content: userMsg }];
     let payload = await callStage3(baseMessages);
 
     // Validate the JSX renderCode by actually transpiling it. On failure, do one
@@ -627,13 +637,26 @@ Rules: 1–${max} cards. Prefer 1 unless the request clearly spans distinct data
   const handleMoveCardGroup = (cardId, group) => setCards(prev => prev.map(c => c.id===cardId ? {...c, group} : c));
   const handleStartEditingPrompt = card => { setEditingCardId(card.id); setEditPromptValue(card.prompt); };
 
+  // Stateful edit: refine the existing card from the instruction instead of cold
+  // regeneration. Keeps the card's data/bindings; the model tweaks code + spec.
   const handleSavePromptEdit = async (cardId) => {
     if (!editPromptValue.trim()) return;
+    const instruction = editPromptValue.trim();
+    const card = cards.find(c => c.id===cardId);
     setEditingCardId(null);
-    setCards(prev => prev.map(c => c.id===cardId ? {...c, prompt:editPromptValue, loading:true, error:null} : c));
+    setCards(prev => prev.map(c => c.id===cardId ? {...c, loading:true, error:null} : c));
     try {
-      const updated = await runAgentPipeline(editPromptValue, cardId);
-      setCards(prev => prev.map(c => c.id===cardId ? updated : c));
+      const prior = card ? {
+        title: card.title, cols: card.cols, rows: card.rows, chrome: card.chrome,
+        bleed: card.bleed, dataBindings: card.dataBindings, renderSpec: card.renderSpec,
+        renderCode: card.renderCode,
+      } : null;
+      const updated = await runAgentPipeline(card?.prompt || instruction, cardId, null, '',
+        prior ? { instruction, prior } : null);
+      // Preserve the card's existing fetched data; refine changes code, not live values.
+      setCards(prev => prev.map(c => c.id===cardId
+        ? { ...updated, prompt: `${card?.prompt || instruction} — ${instruction}`, data: { ...(card?.data || {}), ...(updated.data || {}) } }
+        : c));
     } catch (err) {
       setCards(prev => prev.map(c => c.id===cardId ? {...c, loading:false, error:err.message || 'Unknown error'} : c));
     }
