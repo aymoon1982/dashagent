@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { AppHeader, SettingsDrawer, PipelineView } from './UI.jsx';
 import { DashboardView } from './Dashboard.jsx';
 import { validateRenderCode } from './transpile.js';
-import { resolveBindings, bindingsRefreshInterval, ALLOWED_HOSTS } from './dataLayer.js';
+import { resolveBindings, bindingsRefreshInterval, ALLOWED_HOSTS, PROVIDER_CATALOG, setProxyBase } from './dataLayer.js';
 
 /* ─── CONSTANTS ─── */
 const DEFAULT_MODELS_FAST = ['google/gemini-2.5-flash','deepseek/deepseek-chat','meta-llama/llama-3.3-70b-instruct:free','openai/gpt-4o-mini','anthropic/claude-3-haiku'];
@@ -75,26 +75,22 @@ CRITICAL OUTPUT RULE: Respond with ONLY a single raw JSON object. No markdown fe
 
 ## Data: static vs live (IMPORTANT — read carefully)
 
-You have TWO ways to get live data. Both are fine; bindings are preferred for simple values because the host caches them.
+You have TWO ways to get live data. Prefer PROVIDER BINDINGS — they are tested, cached, and auto-refreshed.
 
-A) DECLARATIVE BINDINGS (preferred): add entries to \`dataBindings\`. Each: { "key": "<name>", "url": "<allowlisted URL>", "refreshSec": <seconds, e.g. 60>, "path": "<optional dotted path into the JSON response>" }. The host fetches each url, follows \`path\`, and sets \`data[key]\`. On failure \`data[key]\` is \`{ __error: "..." }\` — handle it.
+A) PROVIDER BINDINGS (preferred): add entries to \`dataBindings\`. Each:
+   { "key": "<name>", "provider": "<provider id>", "params": { ... }, "refreshSec": <optional override> }
+The host calls the provider, fetches it, and sets \`data[key]\` to the result. On failure \`data[key]\` is \`{ __error: "..." }\` — always handle that.
 
-B) IN-COMPONENT FETCH: you may call the global \`fetch(url)\` inside \`React.useEffect\` (with React.useState for loading/error/result). The provided \`fetch\` ONLY reaches the allowlisted hosts below and times out automatically. Always render a loading state, catch errors, and show a fallback. Use this when you need to chain calls (e.g. geocode → forecast) or transform a large response.
+Available providers (pick the right one and fill params):
+${PROVIDER_CATALOG}
 
-- STATIC data (knowledge, conversions, checklists): put it directly in \`data\`, no bindings, no fetch.
+Notes: weather needs latitude/longitude — add a \`geocode\` binding for the place, then read \`data.<geocodeKey>[0].latitude/longitude\`... OR just bind \`weather\` directly with known coords for a famous city. For multiple cities/coins/pairs, add one binding per item (e.g. key "london", "paris"). Read the provider's described shape from \`data[key]\`.
 
-ALLOWLISTED HOSTS (only these work for bindings OR fetch; anything else is refused): ${ALLOWED_HOSTS.join(', ')}.
+B) RAW BINDING (power use): \`{ "key", "url": "<allowlisted URL>", "path": "<dotted path>", "refreshSec" }\`. Allowlisted hosts only: ${ALLOWED_HOSTS.join(', ')}. You may also call the global \`fetch(url)\` (allowlisted + auto-timeout) inside useEffect for multi-step flows.
 
-Recipes (use these EXACT shapes — they are tested and work from the browser):
-- Crypto price → binding url "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd", path "bitcoin.usd"
-- Crypto 7d history (for a chart) → binding url "https://api.coingecko.com/api/v3/coins/bitcoin/market_chart?vs_currency=usd&days=7", path "prices" (array of [ms, price])
-- FX single pair (e.g. USD→EUR) → binding url "https://api.frankfurter.app/latest?from=USD&to=EUR", path "rates.EUR" (returns a number). For many: to=EUR,GBP,JPY with path "rates" (object).
-- FX history (line) → binding url "https://api.frankfurter.app/2024-01-01..?from=USD&to=EUR", path "rates"
-- Weather → fetch in two steps: geocode "https://geocoding-api.open-meteo.com/v1/search?name=London&count=1" (path results[0].latitude/longitude), then "https://api.open-meteo.com/v1/forecast?latitude=51.5&longitude=-0.12&current=temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=auto&forecast_days=7". Show current conditions BIG plus a 7-day strip (icon from weather_code, hi/lo, rain%). Map weather_code to an emoji/label.
-- Tech / world news → binding url "https://hn.algolia.com/api/v1/search_by_date?tags=story&query=technology&hitsPerPage=12", path "hits" (each hit: title, url, points, author, created_at). Render a scrollable list with title, source domain, points, time.
-- Country facts/flags → "https://restcountries.com/v3.1/name/japan"
+C) STATIC data (knowledge, conversions, checklists, generators): put it directly in \`data\`, no bindings.
 
-For sources NOT on the allowlist (specific equities like AAPL, paywalled news): use the injected web-search results or your knowledge as a CLEARLY-LABELED snapshot in \`data\`, no bindings, and note it in the summary.
+For data with NO provider/allowlisted source (specific equities like AAPL, paywalled/local news, sports scores): use injected web-search results or your knowledge as a CLEARLY-LABELED snapshot in \`data\`, and say so in the summary. Do not invent precise numbers.
 
 ## renderCode Rules
 
@@ -419,7 +415,7 @@ Rules: 1–${max} cards. Prefer 1 unless the request clearly spans distinct data
     // Data: host resolves declarative bindings (no fetching in model code). Merge any
     // statically-embedded data with the freshly fetched values.
     const dataBindings = Array.isArray(payload.dataBindings)
-      ? payload.dataBindings.filter(b => b && b.key && b.url).slice(0, 8)
+      ? payload.dataBindings.filter(b => b && b.key && (b.url || b.provider)).slice(0, 8)
       : [];
     const refreshInterval = bindingsRefreshInterval(dataBindings);
     let liveData = {};
