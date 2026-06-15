@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
 const DEFAULT_MODELS_FAST = ['google/gemini-2.5-flash','deepseek/deepseek-chat','meta-llama/llama-3.3-70b-instruct:free','openai/gpt-4o-mini','anthropic/claude-3-haiku'];
 const DEFAULT_MODELS_SMART = ['deepseek/deepseek-chat','anthropic/claude-3.5-sonnet','google/gemini-2.5-pro','openai/gpt-4o'];
@@ -44,7 +44,7 @@ export function AppHeader({ activeView, setActiveView, isApiConnected, onOpenSet
 }
 
 /* ─── SETTINGS DRAWER ─── */
-export function SettingsDrawer({ isOpen, onClose, activeProvider, openRouterKey, openAIKey, openAIBaseUrl, openCodeKey, openCodeBaseUrl, tavilyKey, modelFast, modelSmart, envSources = {}, onSave }) {
+export function SettingsDrawer({ isOpen, onClose, activeProvider, openRouterKey, openAIKey, openAIBaseUrl, openCodeKey, openCodeBaseUrl, tavilyKey, modelFast, modelSmart, modelsByProvider = {}, defaultModels = {}, envSources = {}, onSave }) {
   const [localProvider, setLocalProvider] = useState(activeProvider);
   const [localORKey, setLocalORKey] = useState(openRouterKey);
   const [localOAIKey, setLocalOAIKey] = useState(openAIKey);
@@ -58,6 +58,8 @@ export function SettingsDrawer({ isOpen, onClose, activeProvider, openRouterKey,
   const [fetchStatus, setFetchStatus] = useState('');
   const [isFetching, setIsFetching] = useState(false);
 
+  const lastProviderRef = useRef(null);
+
   useEffect(() => {
     if (isOpen) {
       setLocalProvider(activeProvider); setLocalORKey(openRouterKey);
@@ -66,6 +68,20 @@ export function SettingsDrawer({ isOpen, onClose, activeProvider, openRouterKey,
       setLocalTavily(tavilyKey); setLocalFast(modelFast); setLocalSmart(modelSmart);
     }
   }, [isOpen]);
+
+  // When the user switches the provider tab, swap the model dropdowns to that
+  // provider's remembered models (so you never keep a model id the new provider
+  // doesn't have). Skips the initial sync that the open-effect performs.
+  useEffect(() => {
+    if (!isOpen) { lastProviderRef.current = null; return; }
+    if (lastProviderRef.current === null) { lastProviderRef.current = localProvider; return; }
+    if (lastProviderRef.current === localProvider) return;
+    lastProviderRef.current = localProvider;
+    const m = modelsByProvider[localProvider] || {};
+    if (!envSources.modelFast)  setLocalFast(m.fast || defaultModels.fast || DEFAULT_MODELS_FAST[0]);
+    if (!envSources.modelSmart) setLocalSmart(m.smart || defaultModels.smart || DEFAULT_MODELS_SMART[0]);
+    setFetchedModels([]); setFetchStatus('');
+  }, [isOpen, localProvider]);
 
   const activeKeyMissing = (() => {
     if (localProvider === 'openrouter') return !localORKey;

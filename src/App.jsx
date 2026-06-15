@@ -140,8 +140,14 @@ export default function App() {
   const [openCodeKey, setOpenCodeKey] = useState(() => envOrStorage(import.meta.env.VITE_OPENCODE_KEY, 'agntdash_opencode_key'));
   const [openCodeBaseUrl, setOpenCodeBaseUrl] = useState(() => envOrStorage(import.meta.env.VITE_OPENCODE_BASE_URL, 'agntdash_opencode_base_url', ''));
   const [tavilyKey, setTavilyKey] = useState(() => envOrStorage(import.meta.env.VITE_TAVILY_KEY, 'agntdash_tavily_key'));
-  const [modelFast, setModelFast] = useState(() => envOrStorage(import.meta.env.VITE_MODEL_FAST, 'agntdash_model_fast', DEFAULT_MODELS_FAST[0]));
-  const [modelSmart, setModelSmart] = useState(() => envOrStorage(import.meta.env.VITE_MODEL_SMART, 'agntdash_model_smart', DEFAULT_MODELS_SMART[0]));
+
+  // Per-provider model memory: each provider remembers its own fast/smart model so
+  // switching providers doesn't leave a model id that doesn't exist on the new one.
+  const [modelsByProvider, setModelsByProvider] = useState(() => load('agntdash_models_by_provider', {}));
+  const initProv = envOrStorage(import.meta.env.VITE_ACTIVE_PROVIDER, 'agntdash_active_provider', 'openrouter');
+  const initModels = (load('agntdash_models_by_provider', {})[initProv]) || {};
+  const [modelFast, setModelFast] = useState(() => envOrStorage(import.meta.env.VITE_MODEL_FAST, 'agntdash_model_fast', initModels.fast || DEFAULT_MODELS_FAST[0]));
+  const [modelSmart, setModelSmart] = useState(() => envOrStorage(import.meta.env.VITE_MODEL_SMART, 'agntdash_model_smart', initModels.smart || DEFAULT_MODELS_SMART[0]));
 
   const [cards, setCards] = useState(() => load('agntdash_cards_v4', DEFAULT_CARDS));
   const [groups, setGroups] = useState(() => load('agntdash_groups_v2', DEFAULT_GROUPS));
@@ -167,6 +173,7 @@ export default function App() {
   useEffect(() => { localStorage.setItem('agntdash_cards_v4', JSON.stringify(cards)); }, [cards]);
   useEffect(() => { localStorage.setItem('agntdash_groups_v2', JSON.stringify(groups)); }, [groups]);
   useEffect(() => { localStorage.setItem('agntdash_templates_v1', JSON.stringify(templates)); }, [templates]);
+  useEffect(() => { localStorage.setItem('agntdash_models_by_provider', JSON.stringify(modelsByProvider)); }, [modelsByProvider]);
   useEffect(() => { localStorage.setItem('agntdash_workflow_config', JSON.stringify(workflowConfig)); }, [workflowConfig]);
 
   useEffect(() => {
@@ -197,6 +204,7 @@ export default function App() {
     if (!ENV_SOURCES.tavilyKey)       localStorage.setItem('agntdash_tavily_key', tv);
     if (!ENV_SOURCES.modelFast)       localStorage.setItem('agntdash_model_fast', mf);
     if (!ENV_SOURCES.modelSmart)      localStorage.setItem('agntdash_model_smart', ms);
+    setModelsByProvider(prev => ({ ...prev, [ap]: { fast: mf, smart: ms } }));
     setIsSettingsOpen(false);
   };
 
@@ -770,6 +778,8 @@ Rules: 1–${max} cards. Prefer 1 unless the request clearly spans distinct data
         tavilyKey={tavilyKey}
         modelFast={modelFast}
         modelSmart={modelSmart}
+        modelsByProvider={modelsByProvider}
+        defaultModels={{ fast: DEFAULT_MODELS_FAST[0], smart: DEFAULT_MODELS_SMART[0] }}
         envSources={ENV_SOURCES}
         onSave={saveSettings}
       />
