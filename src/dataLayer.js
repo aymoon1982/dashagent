@@ -18,16 +18,21 @@
 // no key-bearing endpoints / no arbitrary exfiltration target).
 export const ALLOWED_HOSTS = [
   'api.coingecko.com',          // crypto price + history
+  'api.coincap.io',             // crypto (alt)
+  'api.coinbase.com',           // crypto spot/historic
   'api.open-meteo.com',         // weather (no key)
   'geocoding-api.open-meteo.com', // place -> lat/lon
   'open.er-api.com',            // FX rates (daily)
   'api.frankfurter.app',        // FX rates + history (ECB)
+  'api.frankfurter.dev',        // FX (alt host)
+  'api.exchangerate.host',      // FX (common, no key)
   'hn.algolia.com',             // Hacker News search (tech news, no key)
   'restcountries.com',          // country facts/flags
   'api.wikimedia.org',          // Wikimedia/Wikipedia content + images
   'en.wikipedia.org',           // Wikipedia REST
 ];
 
+const FETCH_TIMEOUT_MS = 9000;
 const cache = new Map();    // url -> { ts, value }
 const inflight = new Map();  // url -> Promise
 
@@ -38,6 +43,32 @@ function hostAllowed(url) {
   } catch {
     return false;
   }
+}
+
+// Real fetch with an abort timeout so a slow/hanging host can never block forever.
+async function timedFetch(url, opts = {}) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...opts, signal: ctrl.signal });
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+/*
+ * Allowlist-enforced fetch handed to model-written components (so a card that
+ * fetches live data in useEffect works) — but it can only reach the read-only
+ * public allowlist, and key storage stays shadowed, so it can't be used to
+ * exfiltrate secrets. Returns the real Response so `.json()` etc. work.
+ */
+export async function safeFetch(url, opts = {}) {
+  if (typeof url !== 'string' || !hostAllowed(url)) {
+    let host = url;
+    try { host = new URL(url).hostname; } catch { /* keep raw */ }
+    throw new Error(`fetch blocked: ${host} is not in the Agntdash data allowlist`);
+  }
+  return timedFetch(url, opts);
 }
 
 // Resolve a dotted/bracketed path like "a.b[0].c" against a JSON object.
@@ -51,7 +82,7 @@ async function fetchJSONWithBackoff(url, { retries = 2 } = {}) {
   let attempt = 0, delay = 600;
   for (;;) {
     try {
-      const res = await fetch(url, { headers: { Accept: 'application/json' } });
+      const res = await timedFetch(url, { headers: { Accept: 'application/json' } });
       if (res.status === 429 || res.status >= 500) throw new Error(`retryable HTTP ${res.status}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return await res.json();

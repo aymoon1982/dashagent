@@ -75,27 +75,32 @@ CRITICAL OUTPUT RULE: Respond with ONLY a single raw JSON object. No markdown fe
 
 ## Data: static vs live (IMPORTANT — read carefully)
 
-Do NOT fetch inside renderCode. Instead declare what you need; the host fetches it (with caching, retries, and refresh) and passes the result to your component as the \`data\` prop. This makes refresh cheap and keeps your component pure.
+You have TWO ways to get live data. Both are fine; bindings are preferred for simple values because the host caches them.
 
-- STATIC data (knowledge, conversions, checklists, anything that doesn't change): put it directly in \`data\` and leave \`dataBindings\` empty.
-- LIVE data: add entries to \`dataBindings\`. Each: { "key": "<name>", "url": "<allowlisted URL>", "refreshSec": <seconds, e.g. 60>, "path": "<optional dotted path into the JSON response>" }. The host fetches each url, follows \`path\` if given, and sets \`data[key]\` to the result. On failure \`data[key]\` is \`{ __error: "..." }\` — handle that.
+A) DECLARATIVE BINDINGS (preferred): add entries to \`dataBindings\`. Each: { "key": "<name>", "url": "<allowlisted URL>", "refreshSec": <seconds, e.g. 60>, "path": "<optional dotted path into the JSON response>" }. The host fetches each url, follows \`path\`, and sets \`data[key]\`. On failure \`data[key]\` is \`{ __error: "..." }\` — handle it.
 
-Your renderCode reads ONLY from the \`data\` prop. Render a graceful fallback when a value is missing or has \`__error\`.
+B) IN-COMPONENT FETCH: you may call the global \`fetch(url)\` inside \`React.useEffect\` (with React.useState for loading/error/result). The provided \`fetch\` ONLY reaches the allowlisted hosts below and times out automatically. Always render a loading state, catch errors, and show a fallback. Use this when you need to chain calls (e.g. geocode → forecast) or transform a large response.
 
-Allowlisted live hosts (any other host is refused): ${ALLOWED_HOSTS.join(', ')}. Examples:
-- Crypto price → url "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd", path "bitcoin.usd"
-- Crypto 7d history → url "https://api.coingecko.com/api/v3/coins/bitcoin/market_chart?vs_currency=usd&days=7", path "prices"
-- FX rates → url "https://api.frankfurter.app/latest?from=USD&to=EUR,GBP,JPY", path "rates"
-- Weather → url "https://api.open-meteo.com/v1/forecast?latitude=51.5&longitude=-0.12&current=temperature_2m,weather_code&daily=temperature_2m_max,temperature_2m_min&timezone=auto"
-- Tech news → url "https://hn.algolia.com/api/v1/search?tags=front_page", path "hits"
+- STATIC data (knowledge, conversions, checklists): put it directly in \`data\`, no bindings, no fetch.
 
-For sources NOT on the allowlist (specific equities, paywalled news): use the injected web-search results or your knowledge as a clearly-labeled snapshot in \`data\`, leave dataBindings empty, and say so in the summary.
+ALLOWLISTED HOSTS (only these work for bindings OR fetch; anything else is refused): ${ALLOWED_HOSTS.join(', ')}.
+
+Recipes (use these EXACT shapes — they are tested and work from the browser):
+- Crypto price → binding url "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd", path "bitcoin.usd"
+- Crypto 7d history (for a chart) → binding url "https://api.coingecko.com/api/v3/coins/bitcoin/market_chart?vs_currency=usd&days=7", path "prices" (array of [ms, price])
+- FX single pair (e.g. USD→EUR) → binding url "https://api.frankfurter.app/latest?from=USD&to=EUR", path "rates.EUR" (returns a number). For many: to=EUR,GBP,JPY with path "rates" (object).
+- FX history (line) → binding url "https://api.frankfurter.app/2024-01-01..?from=USD&to=EUR", path "rates"
+- Weather → fetch in two steps: geocode "https://geocoding-api.open-meteo.com/v1/search?name=London&count=1" (path results[0].latitude/longitude), then "https://api.open-meteo.com/v1/forecast?latitude=51.5&longitude=-0.12&current=temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=auto&forecast_days=7". Show current conditions BIG plus a 7-day strip (icon from weather_code, hi/lo, rain%). Map weather_code to an emoji/label.
+- Tech / world news → binding url "https://hn.algolia.com/api/v1/search_by_date?tags=story&query=technology&hitsPerPage=12", path "hits" (each hit: title, url, points, author, created_at). Render a scrollable list with title, source domain, points, time.
+- Country facts/flags → "https://restcountries.com/v3.1/name/japan"
+
+For sources NOT on the allowlist (specific equities like AAPL, paywalled news): use the injected web-search results or your knowledge as a CLEARLY-LABELED snapshot in \`data\`, no bindings, and note it in the summary.
 
 ## renderCode Rules
 
 1. Named exactly \`CardRenderer\`, takes \`{ data, renderSpec }\`.
 2. WRITE JSX (<div>, <svg>, <img>, <table>…). It is transpiled for you. Do NOT hand-write React.createElement.
-3. Hooks via \`React.useState/useEffect/useRef\` (\`React\` is in scope; no imports).
+3. Hooks via \`React.useState/useEffect/useRef\` (\`React\` is in scope; no imports). \`fetch\` is available (allowlisted + auto-timeout) for option B. Storage/window/document are NOT available — keep components free of those.
 4. No external libraries. Build charts with inline SVG. Images via <img src=…> are fine (e.g. flags, Wikimedia/Unsplash URLs returned in data).
 5. Inline styles only (\`style={{ }}\`); you may use the CSS variables below.
 6. Return ONE root element filling its container: root style \`{ height: '100%', display: 'flex', flexDirection: 'column' }\` (for bleed cards, also set margin/padding 0 and let media use width/height 100% with objectFit cover).
