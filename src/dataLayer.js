@@ -219,11 +219,38 @@ export const PROVIDERS = {
     build: p => `https://en.wikipedia.org/api/rest_v1/page/summary/${enc(p.title||'Bitcoin')}`,
     path: null,
   },
+
+  // ── Proxy-backed providers (Task 3): only resolve when a data proxy is set ──
+  stock_quote: {
+    viaProxy: true, refreshSec: 60,
+    desc: 'Live stock/ETF quote. params: symbol (e.g. AAPL). Returns { price, change, changePercent }',
+    build: p => `/stocks/quote?symbol=${enc(p.symbol||'AAPL')}`, path: null,
+  },
+  stock_history: {
+    viaProxy: true, refreshSec: 3600,
+    desc: 'Stock price history for a chart. params: symbol, range (1mo|3mo|1y). Returns array of { date, close }',
+    build: p => `/stocks/history?symbol=${enc(p.symbol||'AAPL')}&range=${enc(p.range||'3mo')}`, path: null,
+  },
+  news: {
+    viaProxy: true, refreshSec: 900,
+    desc: 'General/world/business news. params: query, category (business|technology|sports|health|...). Returns array of { title, source, url, publishedAt, image }',
+    build: p => `/news?query=${enc(p.query||'')}&category=${enc(p.category||'')}`, path: 'articles',
+  },
+  image_search: {
+    viaProxy: true, refreshSec: 0,
+    desc: 'A photo for a topic/place. params: query. Returns { url, credit }',
+    build: p => `/images?query=${enc(p.query||'')}`, path: null,
+  },
+  sports_scores: {
+    viaProxy: true, refreshSec: 300,
+    desc: 'Sports scores/fixtures/standings. params: league (e.g. epl|nba), team (optional). Returns array',
+    build: p => `/sports?league=${enc(p.league||'')}&team=${enc(p.team||'')}`, path: null,
+  },
 };
 
 // A compact, always-in-sync catalog injected into the agent prompt.
 export const PROVIDER_CATALOG = Object.entries(PROVIDERS)
-  .map(([id, p]) => `- ${id}: ${p.desc}`).join('\n');
+  .map(([id, p]) => `- ${id}${p.viaProxy ? ' (needs data proxy)' : ''}: ${p.desc}`).join('\n');
 
 // Resolve a binding (provider or raw url) into { url, path, refreshSec }.
 function resolveBindingSpec(b) {
@@ -233,7 +260,8 @@ function resolveBindingSpec(b) {
   if (p.viaProxy && !getProxyBase()) return { error: `provider "${b.provider}" needs a data proxy (not configured)` };
   let url;
   try { url = p.build(b.params || {}); } catch (e) { return { error: `bad params for ${b.provider}: ${e.message}` }; }
-  if (p.viaProxy) url = `${getProxyBase().replace(/\/$/, '')}/fetch?url=${enc(url)}`;
+  // viaProxy providers build a proxy-relative path; prepend the configured base.
+  if (p.viaProxy) url = `${getProxyBase().replace(/\/$/, '')}${url}`;
   const path = b.path != null ? b.path : (typeof p.path === 'function' ? p.path(b.params || {}) : p.path);
   return { url, path, refreshSec: b.refreshSec != null ? b.refreshSec : p.refreshSec };
 }

@@ -122,6 +122,7 @@ const ENV_SOURCES = {
   openCodeKey:    !!import.meta.env.VITE_OPENCODE_KEY,
   openCodeBaseUrl:!!import.meta.env.VITE_OPENCODE_BASE_URL,
   tavilyKey:      !!import.meta.env.VITE_TAVILY_KEY,
+  dataProxyUrl:   !!import.meta.env.VITE_DATA_PROXY_URL,
   modelFast:      !!import.meta.env.VITE_MODEL_FAST,
   modelSmart:     !!import.meta.env.VITE_MODEL_SMART,
 };
@@ -142,6 +143,7 @@ export default function App() {
   const [openCodeKey, setOpenCodeKey] = useState(() => envOrStorage(import.meta.env.VITE_OPENCODE_KEY, 'agntdash_opencode_key'));
   const [openCodeBaseUrl, setOpenCodeBaseUrl] = useState(() => envOrStorage(import.meta.env.VITE_OPENCODE_BASE_URL, 'agntdash_opencode_base_url', ''));
   const [tavilyKey, setTavilyKey] = useState(() => envOrStorage(import.meta.env.VITE_TAVILY_KEY, 'agntdash_tavily_key'));
+  const [dataProxyUrl, setDataProxyUrl] = useState(() => envOrStorage(import.meta.env.VITE_DATA_PROXY_URL, 'agntdash_data_proxy_url'));
 
   // Per-provider model memory: each provider remembers its own fast/smart model so
   // switching providers doesn't leave a model id that doesn't exist on the new one.
@@ -176,6 +178,7 @@ export default function App() {
   useEffect(() => { localStorage.setItem('agntdash_groups_v2', JSON.stringify(groups)); }, [groups]);
   useEffect(() => { localStorage.setItem('agntdash_templates_v1', JSON.stringify(templates)); }, [templates]);
   useEffect(() => { localStorage.setItem('agntdash_models_by_provider', JSON.stringify(modelsByProvider)); }, [modelsByProvider]);
+  useEffect(() => { setProxyBase(dataProxyUrl); }, [dataProxyUrl]);
   useEffect(() => { localStorage.setItem('agntdash_workflow_config', JSON.stringify(workflowConfig)); }, [workflowConfig]);
 
   useEffect(() => {
@@ -194,9 +197,10 @@ export default function App() {
   }, []);
 
   /* ─── SAVE SETTINGS ─── */
-  const saveSettings = ({ activeProvider: ap, openRouterKey: or, openAIKey: oai, openAIBaseUrl: oaib, openCodeKey: oc, openCodeBaseUrl: ocb, tavilyKey: tv, modelFast: mf, modelSmart: ms }) => {
+  const saveSettings = ({ activeProvider: ap, openRouterKey: or, openAIKey: oai, openAIBaseUrl: oaib, openCodeKey: oc, openCodeBaseUrl: ocb, tavilyKey: tv, dataProxyUrl: dp, modelFast: mf, modelSmart: ms }) => {
     setActiveProvider(ap); setOpenRouterKey(or); setOpenAIKey(oai); setOpenAIBaseUrl(oaib);
     setOpenCodeKey(oc); setOpenCodeBaseUrl(ocb); setTavilyKey(tv); setModelFast(mf); setModelSmart(ms);
+    if (dp !== undefined) { setDataProxyUrl(dp); if (!ENV_SOURCES.dataProxyUrl) localStorage.setItem('agntdash_data_proxy_url', dp); }
     if (!ENV_SOURCES.activeProvider)  localStorage.setItem('agntdash_active_provider', ap);
     if (!ENV_SOURCES.openRouterKey)   localStorage.setItem('agntdash_or_key', or);
     if (!ENV_SOURCES.openAIKey)       localStorage.setItem('agntdash_openai_key', oai);
@@ -808,6 +812,7 @@ Rules: 1–${max} cards. Prefer 1 unless the request clearly spans distinct data
         openCodeKey={openCodeKey}
         openCodeBaseUrl={openCodeBaseUrl}
         tavilyKey={tavilyKey}
+        dataProxyUrl={dataProxyUrl}
         modelFast={modelFast}
         modelSmart={modelSmart}
         modelsByProvider={modelsByProvider}

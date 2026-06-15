@@ -44,7 +44,7 @@ export function AppHeader({ activeView, setActiveView, isApiConnected, onOpenSet
 }
 
 /* ─── SETTINGS DRAWER ─── */
-export function SettingsDrawer({ isOpen, onClose, activeProvider, openRouterKey, openAIKey, openAIBaseUrl, openCodeKey, openCodeBaseUrl, tavilyKey, modelFast, modelSmart, modelsByProvider = {}, defaultModels = {}, envSources = {}, onSave }) {
+export function SettingsDrawer({ isOpen, onClose, activeProvider, openRouterKey, openAIKey, openAIBaseUrl, openCodeKey, openCodeBaseUrl, tavilyKey, dataProxyUrl, modelFast, modelSmart, modelsByProvider = {}, defaultModels = {}, envSources = {}, onSave }) {
   const [localProvider, setLocalProvider] = useState(activeProvider);
   const [localORKey, setLocalORKey] = useState(openRouterKey);
   const [localOAIKey, setLocalOAIKey] = useState(openAIKey);
@@ -52,6 +52,7 @@ export function SettingsDrawer({ isOpen, onClose, activeProvider, openRouterKey,
   const [localOCKey, setLocalOCKey] = useState(openCodeKey);
   const [localOCBase, setLocalOCBase] = useState(openCodeBaseUrl);
   const [localTavily, setLocalTavily] = useState(tavilyKey);
+  const [localProxy, setLocalProxy] = useState(dataProxyUrl);
   const [localFast, setLocalFast] = useState(modelFast);
   const [localSmart, setLocalSmart] = useState(modelSmart);
   const [fetchedModels, setFetchedModels] = useState([]);
@@ -65,7 +66,7 @@ export function SettingsDrawer({ isOpen, onClose, activeProvider, openRouterKey,
       setLocalProvider(activeProvider); setLocalORKey(openRouterKey);
       setLocalOAIKey(openAIKey); setLocalOAIBase(openAIBaseUrl);
       setLocalOCKey(openCodeKey); setLocalOCBase(openCodeBaseUrl);
-      setLocalTavily(tavilyKey); setLocalFast(modelFast); setLocalSmart(modelSmart);
+      setLocalTavily(tavilyKey); setLocalProxy(dataProxyUrl); setLocalFast(modelFast); setLocalSmart(modelSmart);
     }
   }, [isOpen]);
 
@@ -142,7 +143,7 @@ export function SettingsDrawer({ isOpen, onClose, activeProvider, openRouterKey,
   };
 
   const handleSave = () => {
-    onSave({ activeProvider: localProvider, openRouterKey: localORKey, openAIKey: localOAIKey, openAIBaseUrl: localOAIBase, openCodeKey: localOCKey, openCodeBaseUrl: localOCBase, tavilyKey: localTavily, modelFast: localFast, modelSmart: localSmart });
+    onSave({ activeProvider: localProvider, openRouterKey: localORKey, openAIKey: localOAIKey, openAIBaseUrl: localOAIBase, openCodeKey: localOCKey, openCodeBaseUrl: localOCBase, tavilyKey: localTavily, dataProxyUrl: localProxy, modelFast: localFast, modelSmart: localSmart });
   };
 
   const allFastModels = fetchedModels.length > 0 ? fetchedModels : DEFAULT_MODELS_FAST;
@@ -260,6 +261,15 @@ export function SettingsDrawer({ isOpen, onClose, activeProvider, openRouterKey,
               <label className="form-lbl">Tavily API Key</label>
               <EnvInput type="password" envKey="tavilyKey" value={localTavily} onChange={e => setLocalTavily(e.target.value)} placeholder="tvly-..." />
               {!envSources.tavilyKey && <div className="form-help">Enables real-time web search. Get at <a href="https://tavily.com" target="_blank" rel="noreferrer">tavily.com</a> · or set <code>VITE_TAVILY_KEY</code></div>}
+            </div>
+          </div>
+
+          <div className="settings-sec">
+            <h4>Data Proxy <span style={{ fontSize:9, fontWeight:600, color:'var(--fg-dim)' }}>(optional)</span></h4>
+            <div className="form-g">
+              <label className="form-lbl">Proxy base URL</label>
+              <EnvInput envKey="dataProxyUrl" value={localProxy} onChange={e => setLocalProxy(e.target.value)} placeholder="https://your-proxy.example.com" />
+              <div className="form-help">Unlocks the <code>stocks</code>, <code>news</code>, <code>images</code> &amp; <code>sports</code> providers (CORS-blocked sources). Deploy <code>proxy/server.js</code> (keyless by default) and point here · or set <code>VITE_DATA_PROXY_URL</code>.</div>
             </div>
           </div>
         </div>
