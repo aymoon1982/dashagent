@@ -379,6 +379,10 @@ export function PipelineView({ workflowConfig, setWorkflowConfig, modelFast, mod
             <button className={`toggle ${cfg.autoFitHeight?'on':'off'}`} onClick={() => set('autoFitHeight', !cfg.autoFitHeight)}>{cfg.autoFitHeight?'✓ Enabled':'Disabled'}</button>
           </div>
           <div className="cfg-row">
+            <span className="cfg-lbl">Receive pushed cards (MCP inbox)</span>
+            <button className={`toggle ${cfg.inboxSync!==false?'on':'off'}`} onClick={() => set('inboxSync', cfg.inboxSync===false)}>{cfg.inboxSync!==false?'✓ Enabled':'Disabled'}</button>
+          </div>
+          <div className="cfg-row">
             <span className="cfg-lbl">Default sort order</span>
             <select className="cfg-select" value={cfg.defaultSortOrder||'none'} onChange={e => set('defaultSortOrder', e.target.value)}>
               <option value="none">None (manual)</option>

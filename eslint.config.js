@@ -19,9 +19,9 @@ export default defineConfig([
     },
   },
   {
-    // The data proxy is standalone Node code, not part of the Vite browser build.
-    files: ['proxy/**/*.js'],
+    // The data proxy and MCP server are standalone Node code, not in the Vite build.
+    files: ['proxy/**/*.js', 'mcp/**/*.js'],
     extends: [js.configs.recommended],
-    languageOptions: { globals: globals.node },
+    languageOptions: { globals: globals.node, ecmaVersion: 2023, sourceType: 'module' },
   },
 ])

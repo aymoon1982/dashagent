@@ -24,7 +24,7 @@ const DEFAULT_WORKFLOW_CONFIG = {
   enableAutocomplete: true, clearOnSubmit: true, plannerTemp: 0.3,
   tavilyDepth: 'basic', densePacking: true, gridSnapUnit: 8,
   userSystemPrompt: '',
-  orchestrate: true, maxCards: 6, autoFitHeight: true,
+  orchestrate: true, maxCards: 6, autoFitHeight: true, inboxSync: true,
 };
 
 const DEFAULT_CARDS = [];
@@ -665,6 +665,54 @@ Rules: 1–${max} cards. Prefer 1 unless the request clearly spans distinct data
     return () => timers.forEach(clearInterval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [liveSignature]);
+
+  /* ─── MCP INBOX: ingest cards published by external agents via the proxy ─── */
+  const shapePushedCard = (pub) => {
+    const c = pub.card || {};
+    const ci = (n, lo, hi, def) => { const v = Math.round(Number(n)); return Number.isFinite(v) ? Math.max(lo, Math.min(hi, v)) : def; };
+    const dataBindings = Array.isArray(c.dataBindings) ? c.dataBindings.filter(b => b && b.key && (b.url || b.provider)).slice(0, 8) : [];
+    return {
+      id: 'inbox-' + pub.id,
+      prompt: c.prompt || c.title || 'Pushed card',
+      title: c.title || 'Pushed Card',
+      cols: ci(c.cols, 1, 12, 6), rows: ci(c.rows, 1, 8, 2),
+      chrome: ['full','minimal','none'].includes(c.chrome) ? c.chrome : 'full',
+      bleed: !!c.bleed,
+      group: c.group || 'Inbox',
+      dataBindings, refreshInterval: bindingsRefreshInterval(dataBindings), live: dataBindings.length > 0,
+      data: (c.data && typeof c.data === 'object') ? c.data : {},
+      renderSpec: c.renderSpec || {}, renderCode: c.renderCode || null,
+      dataSource: c.dataSource || 'Pushed via MCP', lastFetched: new Date().toISOString(),
+      state: {}, sizeLocked: false, loading: false, error: null,
+    };
+  };
+
+  const inboxCursorRef = useRef(parseInt(localStorage.getItem('agntdash_inbox_cursor') || '0', 10) || 0);
+  useEffect(() => {
+    if (!dataProxyUrl || workflowConfig.inboxSync === false) return;
+    let stop = false;
+    const base = dataProxyUrl.replace(/\/$/, '');
+    const poll = async () => {
+      try {
+        const r = await fetch(`${base}/inbox/cards?since=${inboxCursorRef.current}`);
+        if (!r.ok) return;
+        const j = await r.json();
+        if (Array.isArray(j.cards) && j.cards.length) {
+          const shaped = await Promise.all(j.cards.map(async (pub) => {
+            const card = shapePushedCard(pub);
+            if (card.dataBindings.length) { try { const d = await resolveBindings(card.dataBindings); card.data = { ...card.data, ...d }; } catch (_) { /* leave fallback */ } }
+            return card;
+          }));
+          shaped.forEach(c => ensureGroup(c.group));
+          setCards(prev => { const have = new Set(prev.map(c => c.id)); return [...prev, ...shaped.filter(c => !have.has(c.id))]; });
+        }
+        if (typeof j.cursor === 'number') { inboxCursorRef.current = j.cursor; localStorage.setItem('agntdash_inbox_cursor', String(j.cursor)); }
+      } catch (_) { /* offline; retry next tick */ }
+    };
+    poll();
+    const t = setInterval(() => { if (!stop) poll(); }, 6000);
+    return () => { stop = true; clearInterval(t); };
+  }, [dataProxyUrl, workflowConfig.inboxSync]);
 
   const handleRefreshAll = () => cards.forEach(c => handleRefreshCard(c.id));
   const handleDeleteCard = id => setCards(prev => prev.filter(c => c.id !== id));

@@ -128,6 +128,11 @@ const ROUTES = {
 
 const readBody = (req) => new Promise(resolve => { let b = ''; req.on('data', c => b += c); req.on('end', () => { try { resolve(JSON.parse(b || '{}')); } catch { resolve({}); } }); });
 
+// ── Card inbox (MCP bridge): agents publish cards here; the dashboard polls them ──
+let inbox = [];
+let inboxSeq = 0;
+const addToInbox = (card) => { const id = ++inboxSeq; inbox.push({ id, publishedAt: new Date().toISOString(), card }); if (inbox.length > 200) inbox = inbox.slice(-200); return id; };
+
 http.createServer(async (req, res) => {
   if (req.method === 'OPTIONS') return json(res, 204, {});
   const u = new URL(req.url, `http://${req.headers.host}`);
@@ -136,6 +141,20 @@ http.createServer(async (req, res) => {
 
   try {
     if (path === '/health') return json(res, 200, { ok: true });
+
+    if (path === '/inbox/cards') {
+      if (req.method === 'POST') {
+        const body = await readBody(req);
+        const list = Array.isArray(body.cards) ? body.cards
+          : body.card ? [body.card]
+          : (body.title || body.renderCode || body.data) ? [body] : [];
+        if (!list.length) return json(res, 400, { __error: 'no card(s) provided' });
+        return json(res, 200, { ok: true, ids: list.map(addToInbox) });
+      }
+      if (req.method === 'DELETE') { inbox = []; return json(res, 200, { ok: true }); }
+      const since = parseInt(params.since || '0', 10) || 0;
+      return json(res, 200, { cards: inbox.filter(x => x.id > since), cursor: inboxSeq });
+    }
 
     // ── Personal-data connectors (Task 4, scaffold) ──
     if (path.startsWith('/connect/')) {
