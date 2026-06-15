@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 
-const DEFAULT_MODELS_FAST = ['google/gemini-2.5-flash','meta-llama/llama-3.3-70b-instruct:free','openai/gpt-4o-mini','anthropic/claude-3-haiku'];
-const DEFAULT_MODELS_SMART = ['anthropic/claude-3.5-sonnet','google/gemini-2.5-pro','openai/gpt-4o','deepseek/deepseek-chat'];
+const DEFAULT_MODELS_FAST = ['google/gemini-2.5-flash','deepseek/deepseek-chat','meta-llama/llama-3.3-70b-instruct:free','openai/gpt-4o-mini','anthropic/claude-3-haiku'];
+const DEFAULT_MODELS_SMART = ['deepseek/deepseek-v4-pro','deepseek/deepseek-chat','anthropic/claude-3.5-sonnet','google/gemini-2.5-pro','openai/gpt-4o'];
 
 /* ─── APP HEADER ─── */
 export function AppHeader({ activeView, setActiveView, isApiConnected, onOpenSettings, onRefreshAll }) {
@@ -288,6 +288,14 @@ export function PipelineView({ workflowConfig, setWorkflowConfig, modelFast, mod
       case 0: return (
         <>
           <div className="cfg-row">
+            <span className="cfg-lbl">Orchestrate: one prompt → multiple cards</span>
+            <button className={`toggle ${cfg.orchestrate?'on':'off'}`} onClick={() => set('orchestrate', !cfg.orchestrate)}>{cfg.orchestrate?'✓ Enabled':'Disabled'}</button>
+          </div>
+          <div className="cfg-row">
+            <span className="cfg-lbl">Max cards per prompt <strong style={{ color:'var(--fg)' }}>{cfg.maxCards||6}</strong></span>
+            <input type="range" className="range" min="1" max="12" step="1" value={cfg.maxCards||6} onChange={e => set('maxCards', parseInt(e.target.value))} />
+          </div>
+          <div className="cfg-row">
             <span className="cfg-lbl">Clear input after submit</span>
             <button className={`toggle ${cfg.clearOnSubmit?'on':'off'}`} onClick={() => set('clearOnSubmit', !cfg.clearOnSubmit)}>{cfg.clearOnSubmit?'✓ Enabled':'Disabled'}</button>
           </div>
@@ -295,7 +303,7 @@ export function PipelineView({ workflowConfig, setWorkflowConfig, modelFast, mod
             <span className="cfg-lbl">Show preset suggestion chips</span>
             <button className={`toggle ${cfg.enableAutocomplete?'on':'off'}`} onClick={() => set('enableAutocomplete', !cfg.enableAutocomplete)}>{cfg.enableAutocomplete?'✓ Enabled':'Disabled'}</button>
           </div>
-          <div className="cfg-io"><strong>Output:</strong> Prompt text → Stage 2 Intent Analyzer</div>
+          <div className="cfg-io"><strong>How it works:</strong> When orchestration is on, a planner model decides whether your prompt becomes one card or a coordinated set, assigns each to a group, and they generate in parallel.</div>
         </>
       );
       case 1: return (
@@ -331,7 +339,7 @@ export function PipelineView({ workflowConfig, setWorkflowConfig, modelFast, mod
             <span className="cfg-lbl">Temperature <strong style={{ color:'var(--fg)' }}>{(cfg.plannerTemp||0.3).toFixed(2)}</strong></span>
             <input type="range" className="range" min="0" max="1" step="0.05" value={cfg.plannerTemp||0.3} onChange={e => set('plannerTemp', parseFloat(e.target.value))} />
           </div>
-          <div className="cfg-io"><strong>Output:</strong> JSON with title · size · data · renderSpec · renderCode (validated React.createElement function) → Stage 5</div>
+          <div className="cfg-io"><strong>Output:</strong> JSON with title · cols/rows · live flag · refreshInterval · renderSpec · renderCode (JSX component). The renderCode is transpiled and validated; if it fails to compile the model auto-repairs it once before the card lands.</div>
         </>
       );
       case 4: return (
@@ -339,6 +347,10 @@ export function PipelineView({ workflowConfig, setWorkflowConfig, modelFast, mod
           <div className="cfg-row">
             <span className="cfg-lbl">Dense grid packing</span>
             <button className={`toggle ${cfg.densePacking?'on':'off'}`} onClick={() => set('densePacking', !cfg.densePacking)}>{cfg.densePacking?'✓ Enabled':'Disabled'}</button>
+          </div>
+          <div className="cfg-row">
+            <span className="cfg-lbl">Auto-fit card height to content</span>
+            <button className={`toggle ${cfg.autoFitHeight?'on':'off'}`} onClick={() => set('autoFitHeight', !cfg.autoFitHeight)}>{cfg.autoFitHeight?'✓ Enabled':'Disabled'}</button>
           </div>
           <div className="cfg-row">
             <span className="cfg-lbl">Default sort order</span>

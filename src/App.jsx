@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
 import { AppHeader, SettingsDrawer, PipelineView } from './UI.jsx';
 import { DashboardView } from './Dashboard.jsx';
+import { validateRenderCode } from './transpile.js';
 
 /* ─── CONSTANTS ─── */
-const DEFAULT_MODELS_FAST = ['google/gemini-2.5-flash','meta-llama/llama-3.3-70b-instruct:free','openai/gpt-4o-mini','anthropic/claude-3-haiku'];
-const DEFAULT_MODELS_SMART = ['anthropic/claude-3.5-sonnet','google/gemini-2.5-pro','openai/gpt-4o','deepseek/deepseek-chat'];
+const DEFAULT_MODELS_FAST = ['google/gemini-2.5-flash','deepseek/deepseek-chat','meta-llama/llama-3.3-70b-instruct:free','openai/gpt-4o-mini','anthropic/claude-3-haiku'];
+const DEFAULT_MODELS_SMART = ['deepseek/deepseek-v4-pro','deepseek/deepseek-chat','anthropic/claude-3.5-sonnet','google/gemini-2.5-pro','openai/gpt-4o'];
 const ACCENT_COLORS = ['#6366f1','#a855f7','#10b981','#f59e0b','#ef4444','#ec4899','#06b6d4'];
 
 const SAMPLE_PROMPTS = [
@@ -21,6 +22,7 @@ const DEFAULT_WORKFLOW_CONFIG = {
   enableAutocomplete: true, clearOnSubmit: true, plannerTemp: 0.3,
   tavilyDepth: 'basic', densePacking: true, gridSnapUnit: 8,
   userSystemPrompt: '',
+  orchestrate: true, maxCards: 6, autoFitHeight: true,
 };
 
 const DEFAULT_CARDS = [];
@@ -32,95 +34,67 @@ const DEFAULT_GROUPS = [
 ];
 
 /* ─── FIXED SYSTEM PROMPT ─── */
-export const FIXED_SYSTEM_PROMPT = `You are a dashboard card generator for Agntdash, an AI-native fluid grid dashboard.
+export const FIXED_SYSTEM_PROMPT = `You are an autonomous dashboard card agent for Agntdash. You decide everything about a card: what data it needs, whether that data is static or live, how big it should be, which visualization best represents it, and you write the React component that renders it. There is NO fixed card design — you invent the right one for each request.
 
-CRITICAL OUTPUT RULES (violations will break the app):
-1. Respond with ONLY a raw JSON object. No markdown fences, no preamble, no explanation. Your entire response must start with { and end with }.
-2. renderCode MUST use React.createElement() exclusively. NEVER write JSX (< > tags). JSX is not valid JavaScript inside new Function() and will cause a SyntaxError.
-   WRONG: return (<div>hello</div>)
-   RIGHT: return React.createElement('div', null, 'hello')
+CRITICAL OUTPUT RULE: Respond with ONLY a single raw JSON object. No markdown fences, no preamble, no explanation. Your entire response must start with { and end with }.
 
-## Your Mission (execute in this exact order)
+## Your Mission (in order)
 
-1. UNDERSTAND — Parse the user intent and identify exactly what data is needed, what format best suits it, and what interaction model would be most useful.
+1. UNDERSTAND — Parse the intent. Identify the exact data needed and the single best way to represent it (chart, table, list, KPI, map, gauge, image, timeline, gallery, interactive widget…). Pick the representation that fits the data, not a template.
 
-2. ACQUIRE — Use provided search results as primary data when available. Supplement from your knowledge base when search results are absent or incomplete. Always prefer factual, current data over placeholders.
+2. DECIDE STATIC vs LIVE — If the answer changes over time (prices, weather, FX, news, scores), make it LIVE: fetch real data at render time (see Live Data). If it is stable (conversions, knowledge, checklists, countdowns computed locally), make it static and embed the data.
 
-3. VERIFY — Confirm the data is accurate, complete, and directly answers the request. If data is uncertain, reflect that in the renderSpec summary. Never fabricate specific numbers (prices, statistics) without a data source.
+3. SIZE YOURSELF — Choose cols (1–12 grid columns) and rows (1–8 row units, each ~120px tall) that fit the content. A single number needs 3×1; a rich chart needs ~8×3; a wide table or multi-series panel can be 12×4. Do not over- or under-size.
 
-4. DESIGN — Choose the visualization that best communicates this specific data type and user intent. Match complexity to the data: simple data → clean minimal card; rich data → interactive component.
+4. DESIGN & CODE — Write a self-contained React component in JSX. Make it genuinely beautiful and information-dense.
 
-5. CODE — Write a self-contained React component using only React.createElement() that renders the visualization beautifully.
-
-## Output Format
-
-Return ONLY valid JSON — no markdown fences, no explanation text:
+## Output Format (JSON only)
 
 {
   "title": "Concise card title (3-6 words)",
-  "size": "xs|sm|md|lg|xl",
-  "dataSource": "Data origin description",
+  "cols": 6,
+  "rows": 2,
+  "dataSource": "Where the data comes from (API name, 'live', or 'AI knowledge')",
   "refreshInterval": 0,
+  "live": false,
   "data": {},
-  "renderSpec": {
-    "color": "#hex accent color",
-    "summary": "One-sentence insight or status"
-  },
-  "renderCode": "function CardRenderer({data, renderSpec}) { ... }"
+  "renderSpec": { "color": "#hex accent color", "summary": "One-sentence insight or status" },
+  "renderCode": "function CardRenderer({ data, renderSpec }) { return (<div>…</div>); }"
 }
 
-## Size Guide
-- xs: 3×1 — single metric, timer, toggle
-- sm: 4×2 — compact list, small chart, mini table
-- md: 6×2 — standard card, news feed, medium chart
-- lg: 6×3 — detailed chart, multi-column table, rich content
-- xl: 12×3 — full-width dashboard panel, complex visualization
+- cols: integer 1–12. rows: integer 1–8. Size to the content.
+- refreshInterval: seconds between auto-refreshes (regenerates the card). 0 = never. Use 60–900 for live data; minimum honored is 15.
+- live: true if renderCode fetches its own real-time data at render time.
 
 ## renderCode Rules
 
-CRITICAL REQUIREMENTS:
-1. The function MUST be named \`CardRenderer\`
-2. Takes \`{data, renderSpec}\` as destructured props
-3. Uses ONLY \`React.createElement()\` — absolutely NO JSX syntax
-4. May use \`React.useState()\` and \`React.useEffect()\` for interactivity
-5. Must handle null/empty/missing data gracefully with a fallback div
-6. All styles must be inline; no external CSS classes except system CSS variables
-7. Returns exactly ONE root React element
+1. The component MUST be named exactly \`CardRenderer\` and take \`{ data, renderSpec }\`.
+2. WRITE JSX. Normal JSX (<div>, <svg>, …) is fully supported and preferred — it is transpiled for you. Do NOT hand-write React.createElement.
+3. Hooks: use \`React.useState\`, \`React.useEffect\`, \`React.useRef\` (the symbol \`React\` is in scope; there are no other imports).
+4. Self-contained: no external libraries, no import statements. Build charts with inline SVG.
+5. All styling inline via the \`style\` prop (use \`style={{ }}\`). You may also use the CSS variables below.
+6. Return exactly ONE root element. It should fill its container: root style \`{ height: '100%', display: 'flex', flexDirection: 'column' }\`.
+7. ALWAYS handle loading, empty, and error states gracefully — never crash. Null-check every data access.
 
-Available CSS variables (dark background theme):
-- \`var(--fg)\` — primary text color
-- \`var(--fg-muted)\` — secondary text
-- \`var(--fg-dim)\` — tertiary / disabled text
-- \`var(--primary)\` — brand indigo (#6366f1)
-- \`var(--success)\` — green (#10b981)
-- \`var(--danger)\` — red (#ef4444)
-- \`var(--warning)\` — amber (#f59e0b)
-- \`var(--border)\` — subtle border color
-- \`var(--fn)\` — system font stack
-- \`var(--mo)\` — monospace font (JetBrains Mono)
+Available CSS variables (dark theme): \`var(--fg)\`, \`var(--fg-muted)\`, \`var(--fg-dim)\`, \`var(--primary)\` (#6366f1), \`var(--success)\` (#10b981), \`var(--danger)\` (#ef4444), \`var(--warning)\` (#f59e0b), \`var(--border)\`, \`var(--fn)\` (font), \`var(--mo)\` (monospace).
 
-## Visualization Decision Matrix
+## Live Data (when live=true)
 
-Choose the best fit for the data:
+For real-time cards, fetch inside \`React.useEffect\` using the global \`fetch\`, with React.useState for {loading, error, data}. Use these reliable, key-free, CORS-enabled public APIs:
 
-- Time-series / price history → SVG polyline with gradient area fill, x-axis labels, current value + % change header
-- Comparison table (cities, products, metrics) → HTML table with alternating row shading, colored key column
-- News / article feed → Scrollable list with colored left-border accent, title + source + time metadata
-- Checklist / tasks / habits → React.useState for checked state, progress bar, strikethrough on completed items
-- Live converter / calculator → Controlled input with React.useState, immediate derived output display
-- Countdown timer → React.useEffect with setInterval, formatted d/h/m/s, clearInterval on cleanup
-- Portfolio / allocation → Horizontal bars with percentages, color-coded per asset, total validates to 100%
-- Single KPI / metric → Large prominent number, delta badge, trend sparkline if data available
-- Geographic / multi-location → Grid or table layout, flag emoji, metric columns, status badges
-- Interactive widget → Clean controls (buttons/sliders/inputs), immediate feedback, zero external dependencies
+- Crypto prices/history → CoinGecko: \`https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd\` and \`https://api.coingecko.com/api/v3/coins/bitcoin/market_chart?vs_currency=usd&days=7\`
+- Currency / FX rates → \`https://open.er-api.com/v6/latest/USD\`
+- Weather (no key) → geocode with \`https://geocoding-api.open-meteo.com/v1/search?name=London&count=1\` then \`https://api.open-meteo.com/v1/forecast?latitude=..&longitude=..&current=temperature_2m,weather_code&daily=temperature_2m_max,temperature_2m_min&timezone=auto\`
 
-## Quality Standards
+Always render a loading state first, catch fetch errors into an error state, and show a clear fallback. If a needed live source is not in this list (e.g. specific equities/news), use the injected search results or AI knowledge as a clearly-labeled snapshot and set live=false.
 
-- Visually rich: use gradients, color accents, subtle backgrounds, SVG for charts
-- Information-dense: maximize relevant data shown within the card size
-- Interactive where it adds value: counters, converters, toggles, expandable sections
-- Responsive: percentage widths and flex layouts that adapt to card size
-- Error-safe: null-check all data access, provide graceful fallback renders`;
+## Data Integrity
+
+Use injected live search results as the PRIMARY source when present. Never fabricate specific prices/statistics without a source — either fetch them live, use provided search data, or state in the summary that the figure is approximate.
+
+## Quality Bar
+
+Visually rich (gradients, accents, inline SVG charts), information-dense, responsive to the card size, interactive where it helps (toggles, inputs, expandable rows), and error-safe. Match the visualization to the data — a price needs a chart, a comparison needs a table, a status needs a KPI.`;
 
 /* ─── APP ─── */
 const ENV_SOURCES = {
@@ -183,7 +157,7 @@ export default function App() {
       if (!resizeRef.current) return;
       const { cardId, startCols, startRows, startX, startY } = resizeRef.current;
       const newCols = Math.max(2, Math.min(12, startCols + Math.round((e.clientX - startX) / 100)));
-      const newRows = Math.max(1, Math.min(6, startRows + Math.round((e.clientY - startY) / 140)));
+      const newRows = Math.max(1, Math.min(8, startRows + Math.round((e.clientY - startY) / 140)));
       setCards(prev => prev.map(c => c.id === cardId ? { ...c, cols: newCols, rows: newRows } : c));
     };
     resizeUpRef.current = () => {
@@ -227,17 +201,58 @@ export default function App() {
     throw new Error(`Model returned non-JSON. Got: "${preview}…" — Try a different smart model or lower temperature.`);
   };
 
-  /* ─── AGENT PIPELINE (3-stage) ─── */
-  const runAgentPipeline = async (promptText, existingCardId = null) => {
+  /* ─── PROVIDER HELPERS ─── */
+  const getProviderConn = () => {
     const key = activeProvider==='openrouter' ? openRouterKey : activeProvider==='openai' ? openAIKey : openCodeKey;
     const base = activeProvider==='openrouter' ? 'https://openrouter.ai/api/v1' : activeProvider==='openai' ? openAIBaseUrl : openCodeBaseUrl;
-    const getGroup = () => existingCardId ? (cards.find(c=>c.id===existingCardId)?.group || 'Personal') : 'Personal';
-    const sizeToGrid = size => size==='xs'?{cols:3,rows:1}:size==='sm'?{cols:4,rows:2}:size==='md'?{cols:6,rows:2}:size==='lg'?{cols:6,rows:3}:{cols:12,rows:3};
-    const llm = (model, messages, temp = 0.3) => fetch(`${base}/chat/completions`, {
-      method: 'POST',
-      headers: { 'Content-Type':'application/json', 'Authorization':`Bearer ${key}` },
-      body: JSON.stringify({ model, messages, temperature: temp, max_tokens: 4096 })
+    return { key, base };
+  };
+
+  const callLLM = (model, messages, temp = 0.3, maxTokens = 8000) => {
+    const { key, base } = getProviderConn();
+    const headers = { 'Content-Type':'application/json', 'Authorization':`Bearer ${key}` };
+    if (activeProvider === 'openrouter') {
+      headers['HTTP-Referer'] = window.location.origin;
+      headers['X-Title'] = 'Agntdash';
+    }
+    return fetch(`${base}/chat/completions`, {
+      method: 'POST', headers,
+      body: JSON.stringify({ model, messages, temperature: temp, max_tokens: maxTokens })
     });
+  };
+
+  /* ─── STAGE 0: DASHBOARD PLANNER (one prompt → one or many coordinated cards) ─── */
+  const runDashboardPlanner = async (promptText) => {
+    const single = [{ prompt: promptText, group: null, title: null }];
+    if (!workflowConfig.orchestrate) return single;
+    const max = Math.max(1, Math.min(12, workflowConfig.maxCards || 6));
+    try {
+      const res = await callLLM(modelFast, [
+        { role:'system', content:`You are a dashboard architect. Given a user request, decide how many dashboard cards best answer it and what each should show. A focused request ("Bitcoin price this week") is ONE card. A broad request ("set up my finance dashboard", "everything about Tokyo", "my morning briefing") becomes SEVERAL focused cards. Respond with ONLY JSON (no markdown): {"cards":[{"prompt":"self-contained prompt for a single card","group":"Finance|Personal|Work or a short new group name","title":"3-5 word label"}]}. Each prompt must stand alone (it will be generated independently). Return between 1 and ${max} cards. Prefer 1 unless the request clearly spans distinct data or visuals.` },
+        { role:'user', content: promptText }
+      ], 0.2, 1500);
+      if (!res.ok) return single;
+      const j = await res.json();
+      const parsed = extractJSON(j.choices?.[0]?.message?.content || '');
+      const list = Array.isArray(parsed.cards) ? parsed.cards : [];
+      const cleaned = list
+        .filter(c => c && typeof c.prompt === 'string' && c.prompt.trim())
+        .slice(0, max)
+        .map(c => ({ prompt: c.prompt.trim(), group: (c.group || '').trim() || null, title: (c.title || '').trim() || null }));
+      return cleaned.length ? cleaned : single;
+    } catch (e) {
+      console.warn('Planner failed, falling back to single card:', e.message);
+      return single;
+    }
+  };
+
+  /* ─── AGENT PIPELINE (per-card) ─── */
+  const runAgentPipeline = async (promptText, existingCardId = null, forcedGroup = null) => {
+    const { key } = getProviderConn();
+    const getGroup = () => forcedGroup || (existingCardId ? (cards.find(c=>c.id===existingCardId)?.group || 'Personal') : 'Personal');
+    const sizeToGrid = size => size==='xs'?{cols:3,rows:1}:size==='sm'?{cols:4,rows:2}:size==='md'?{cols:6,rows:2}:size==='lg'?{cols:6,rows:3}:{cols:12,rows:3};
+    const clamp = (n, lo, hi, def) => { const v = Math.round(Number(n)); return Number.isFinite(v) ? Math.max(lo, Math.min(hi, v)) : def; };
+    const llm = (model, messages, temp = 0.3, maxTokens = 8000) => callLLM(model, messages, temp, maxTokens);
 
     if (!key) throw new Error('No API key configured. Open Settings to connect an LLM provider.');
 
@@ -289,13 +304,6 @@ export default function App() {
       ? `User request: ${promptText}\n\nLive search results (use as primary data source):\n${searchContext}`
       : `User request: ${promptText}`;
 
-    // JSX detection: strip string literals then look for < tag patterns
-    const containsJSX = (code) => {
-      if (!code) return false;
-      const stripped = code.replace(/'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"|`(?:[^`\\]|\\.)*`/g, '""');
-      return /<[a-zA-Z][a-zA-Z0-9.]*[\s\/>]/.test(stripped);
-    };
-
     // Helper: call Stage 3 and return parsed payload
     const callStage3 = async (messages) => {
       const res = await llm(modelSmart, messages, workflowConfig.plannerTemp || 0.3);
@@ -318,53 +326,60 @@ export default function App() {
     const baseMessages = [{role:'system',content:sysContent},{role:'user',content:userMsg}];
     let payload = await callStage3(baseMessages);
 
-    // Auto-retry if LLM generated JSX instead of React.createElement
-    if (containsJSX(payload.renderCode)) {
-      console.warn('[Agntdash] JSX detected in renderCode — auto-retrying with correction...');
+    // Validate the JSX renderCode by actually transpiling it. On failure, do one
+    // automatic repair round-trip feeding the exact compiler error back to the model.
+    let check = validateRenderCode(payload.renderCode);
+    if (!check.ok) {
+      console.warn('[Agntdash] renderCode failed to compile, attempting auto-repair:', check.error);
       try {
         payload = await callStage3([
           ...baseMessages,
           { role:'assistant', content: JSON.stringify(payload) },
-          { role:'user', content: '⚠️ CRITICAL CORRECTION: Your renderCode contains JSX syntax (HTML-like < > tags). JSX is not valid JavaScript and causes a SyntaxError. You MUST rewrite the entire renderCode function using ONLY React.createElement() calls — zero JSX tags anywhere. Example: React.createElement("div", {style:{color:"red"}}, "text") — never <div style={{color:"red"}}>text</div>. Return the complete corrected JSON now.' }
+          { role:'user', content: `Your renderCode failed to compile with this error:\n\n${check.error}\n\nFix it. Return the COMPLETE corrected JSON object. The component must be named CardRenderer, take { data, renderSpec }, be valid JSX (no imports), and handle null data safely.` }
         ]);
-      } catch (retryErr) {
-        console.warn('[Agntdash] JSX retry failed:', retryErr.message);
+        check = validateRenderCode(payload.renderCode);
+      } catch (repairErr) {
+        console.warn('[Agntdash] auto-repair call failed:', repairErr.message);
       }
     }
-
-    // Validate renderCode syntax — non-fatal: card loads, renderer shows parse error with code
-    if (payload.renderCode) {
-      try {
-        // eslint-disable-next-line no-new-func
-        new Function('React', 'return (' + payload.renderCode + ')');
-      } catch (syntaxErr) {
-        const isJSX = containsJSX(payload.renderCode);
-        console.warn('[Agntdash] renderCode syntax error:', syntaxErr.message);
-        payload.renderSpec = {
-          ...(payload.renderSpec || {}),
-          summary: isJSX
-            ? `Syntax error: model used JSX instead of React.createElement(). Click Retry.`
-            : `Syntax error: ${syntaxErr.message}. Click Retry.`
-        };
-      }
+    if (!check.ok) {
+      payload.renderSpec = {
+        ...(payload.renderSpec || {}),
+        summary: `Generation error: ${check.error}. Click Retry to regenerate.`
+      };
     }
 
-    const { cols, rows } = sizeToGrid(payload.size || 'md');
+    // Agentic sizing: prefer the model's direct cols/rows; fall back to size enum.
+    const fallback = sizeToGrid(payload.size || 'md');
+    const cols = clamp(payload.cols, 1, 12, fallback.cols);
+    const rows = clamp(payload.rows, 1, 8, fallback.rows);
+    let refreshInterval = clamp(payload.refreshInterval, 0, 86400, 0);
+    if (refreshInterval > 0 && refreshInterval < 15) refreshInterval = 15; // floor to avoid hammering APIs
+
     return {
       id: existingCardId || Math.random().toString(36).slice(2,9),
       prompt: promptText,
       title: payload.title || 'AI Card',
-      size: payload.size || 'md',
-      dataSource: searchUsed ? `Tavily · ${payload.dataSource || 'Web Search'}` : (payload.dataSource || 'AI Knowledge'),
-      refreshInterval: payload.refreshInterval || 0,
+      size: payload.size || (cols >= 12 ? 'xl' : cols >= 6 ? (rows >= 3 ? 'lg' : 'md') : rows >= 2 ? 'sm' : 'xs'),
+      dataSource: searchUsed ? `Tavily · ${payload.dataSource || 'Web Search'}` : (payload.dataSource || (payload.live ? 'Live API' : 'AI Knowledge')),
+      refreshInterval,
+      live: !!payload.live,
       group: getGroup(),
       cols, rows,
       data: payload.data,
       renderSpec: payload.renderSpec || {},
-      renderCode: payload.renderCode || null,
+      renderCode: check.ok ? payload.renderCode : (payload.renderCode || null),
       lastFetched: new Date().toISOString(),
       loading: false, error: null,
     };
+  };
+
+  /* ─── ensure a group exists, creating it on demand (dashboard self-arranges) ─── */
+  const ensureGroup = (name) => {
+    if (!name) return;
+    setGroups(prev => prev.some(g => g.name.toLowerCase() === name.toLowerCase())
+      ? prev
+      : [...prev, { name, color: ACCENT_COLORS[prev.length % ACCENT_COLORS.length], collapsed: false }]);
   };
 
   /* ─── HANDLERS ─── */
@@ -372,14 +387,35 @@ export default function App() {
     if (!isApiConnected) { setIsSettingsOpen(true); return; }
     if (!promptText.trim()) { handleAddNewCardPlaceholder(groups[0]?.name || 'Personal'); return; }
     setIsConsoleSubmitting(true);
-    const tempId = Math.random().toString(36).slice(2,9);
-    setCards(prev => [...prev, { id:tempId, prompt:promptText, title:'Analyzing Intent…', size:'md', cols:6, rows:2, group:'Personal', loading:true, error:null }]);
     if (workflowConfig.clearOnSubmit) setConsolePrompt('');
+
     try {
-      const card = await runAgentPipeline(promptText);
-      setCards(prev => prev.map(c => c.id===tempId ? {...card, id:tempId} : c));
+      // Stage 0: planner decides whether this is one card or a coordinated set.
+      const plan = await runDashboardPlanner(promptText);
+      const fallbackGroup = groups[0]?.name || 'Personal';
+
+      // Create a placeholder per planned card so they fill in live and in parallel.
+      const planned = plan.map(p => ({
+        ...p,
+        group: p.group || fallbackGroup,
+        tempId: Math.random().toString(36).slice(2,9),
+      }));
+      planned.forEach(p => ensureGroup(p.group));
+      setCards(prev => [
+        ...prev,
+        ...planned.map(p => ({ id:p.tempId, prompt:p.prompt, title:p.title || 'Analyzing…', size:'md', cols:6, rows:2, group:p.group, loading:true, error:null })),
+      ]);
+
+      await Promise.all(planned.map(async (p) => {
+        try {
+          const card = await runAgentPipeline(p.prompt, null, p.group);
+          setCards(prev => prev.map(c => c.id===p.tempId ? {...card, id:p.tempId} : c));
+        } catch (err) {
+          setCards(prev => prev.map(c => c.id===p.tempId ? {...c, title:'Error', loading:false, error:err.message||'Pipeline failed. Check API keys.'} : c));
+        }
+      }));
     } catch (err) {
-      setCards(prev => prev.map(c => c.id===tempId ? {...c, title:'Error', loading:false, error:err.message||'Pipeline failed. Check API keys.'} : c));
+      console.warn('[Agntdash] add card failed:', err.message);
     } finally { setIsConsoleSubmitting(false); }
   };
 
@@ -394,6 +430,40 @@ export default function App() {
       setCards(prev => prev.map(c => c.id===cardId ? {...c, loading:false, error:err.message || 'Unknown error'} : c));
     }
   };
+
+  /* ─── AI REPAIR: fix a crashing component using its runtime error ─── */
+  const handleRepairCard = async (cardId, errorMessage) => {
+    const card = cards.find(c => c.id===cardId);
+    if (!card) return;
+    if (!card.renderCode) return handleRefreshCard(cardId);
+    setCards(prev => prev.map(c => c.id===cardId ? {...c, loading:true, error:null} : c));
+    try {
+      const res = await callLLM(modelSmart, [
+        { role:'system', content: FIXED_SYSTEM_PROMPT },
+        { role:'user', content: `This CardRenderer crashed with the following error:\n\n${errorMessage || 'unknown runtime error'}\n\nCurrent renderCode:\n\n${card.renderCode}\n\nReturn ONLY a JSON object {"renderCode":"<corrected CardRenderer JSX>"}. Keep the same visual intent but add null-checks and guards so it never throws.` }
+      ], 0.2);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const j = await res.json();
+      const parsed = extractJSON(j.choices?.[0]?.message?.content || '');
+      const check = validateRenderCode(parsed.renderCode);
+      if (!check.ok) throw new Error(check.error);
+      setCards(prev => prev.map(c => c.id===cardId ? {...c, renderCode: parsed.renderCode, loading:false, error:null, lastFetched:new Date().toISOString()} : c));
+    } catch (err) {
+      setCards(prev => prev.map(c => c.id===cardId ? {...c, loading:false, error:`Repair failed: ${err.message}. Click Retry to regenerate.`} : c));
+    }
+  };
+
+  /* ─── AUTO-REFRESH: drive live cards on their refreshInterval ─── */
+  const refreshRef = useRef(handleRefreshCard);
+  refreshRef.current = handleRefreshCard;
+  const liveSignature = cards.map(c => `${c.id}:${c.refreshInterval||0}:${c.loading?1:0}:${c.error?1:0}:${c.isCreating?1:0}`).join('|');
+  useEffect(() => {
+    const live = cards.filter(c => c.refreshInterval > 0 && !c.loading && !c.error && !c.isCreating);
+    if (!live.length) return;
+    const timers = live.map(c => setInterval(() => refreshRef.current(c.id), c.refreshInterval * 1000));
+    return () => timers.forEach(clearInterval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveSignature]);
 
   const handleRefreshAll = () => cards.forEach(c => handleRefreshCard(c.id));
   const handleDeleteCard = id => setCards(prev => prev.filter(c => c.id !== id));
@@ -468,6 +538,7 @@ export default function App() {
 
   const handlers = {
     onRefresh: handleRefreshCard,
+    onRepair: handleRepairCard,
     onDelete: handleDeleteCard,
     onMove: handleMoveCardGroup,
     onStartEdit: handleStartEditingPrompt,

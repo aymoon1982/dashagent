@@ -42,9 +42,11 @@ function PromptConsole({ consolePrompt, setConsolePrompt, onAddCard, isSubmittin
 }
 
 /* ─── CARD WRAPPER ─── */
-function CardWrapper({ card, group, groups, handlers, isEditing, editPromptValue, setEditPromptValue, isDragging }) {
+function CardWrapper({ card, group, groups, handlers, isEditing, editPromptValue, setEditPromptValue, isDragging, workflowConfig }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef(null);
+  const bodyRef = useRef(null);
+  const [autoRows, setAutoRows] = useState(card.rows);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -53,14 +55,36 @@ function CardWrapper({ card, group, groups, handlers, isEditing, editPromptValue
     return () => document.removeEventListener('mousedown', close);
   }, [menuOpen]);
 
+  // Content-driven sizing: grow the card to fit its rendered content (never shrink
+  // below the model's chosen rows). Re-measures shortly after render to catch
+  // async/live data. Capped at 8 rows.
+  useEffect(() => {
+    setAutoRows(card.rows);
+    if (!workflowConfig?.autoFitHeight || card.isCreating || card.loading || card.error || isEditing) return;
+    const ROW = 82, CHROME = 96, MAX = 8;
+    let raf, t1, t2;
+    const measure = () => {
+      const bd = bodyRef.current;
+      const content = bd?.querySelector('.card-bd')?.firstElementChild;
+      if (!content) return;
+      const needed = Math.ceil((content.scrollHeight + CHROME) / ROW);
+      setAutoRows(prev => Math.max(card.rows, Math.min(MAX, Math.max(prev, needed))));
+    };
+    raf = requestAnimationFrame(measure);
+    t1 = setTimeout(measure, 400);
+    t2 = setTimeout(measure, 1200);
+    return () => { cancelAnimationFrame(raf); clearTimeout(t1); clearTimeout(t2); };
+  }, [card.rows, card.renderCode, card.loading, card.error, card.isCreating, isEditing, workflowConfig?.autoFitHeight]);
+
   const color = group?.color || '#6366f1';
   const accent = card.renderSpec?.color || color;
   const accentBg = accent + '22';
 
   return (
     <div
+      ref={bodyRef}
       className="card-wrapper"
-      style={{ '--cols': card.cols, '--rows': card.rows }}
+      style={{ '--cols': card.cols, '--rows': autoRows }}
       draggable={!isEditing}
       onDragStart={e => handlers.onDragStart(e, card.id)}
       onDragOver={e => handlers.onDragOver(e, card.id)}
@@ -119,7 +143,7 @@ function CardWrapper({ card, group, groups, handlers, isEditing, editPromptValue
           <div className="card-bd">
             {card.isCreating
               ? <InlineCardCreator card={card} onGenerate={handlers.onGenerate} onCancel={handlers.onCancel} />
-              : <CardBody card={card} onRetry={() => handlers.onRefresh(card.id)} />
+              : <CardBody card={card} onRetry={() => handlers.onRefresh(card.id)} onRepair={(msg) => handlers.onRepair(card.id, msg)} />
             }
           </div>
 
@@ -266,6 +290,7 @@ function GroupSection({ group, cards, groups, handlers, editingCardId, editPromp
               editPromptValue={editPromptValue}
               setEditPromptValue={setEditPromptValue}
               isDragging={draggingCardId === card.id}
+              workflowConfig={workflowConfig}
             />
           ))}
         </div>

@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { compileRenderCode } from './transpile.js';
 
 export function InlineCardCreator({ card, onGenerate, onCancel }) {
   const [val, setVal] = useState('');
@@ -49,6 +50,8 @@ class RenderErrorBoundary extends React.Component {
   constructor(props) { super(props); this.state = { error: null }; }
   static getDerivedStateFromError(err) { return { error: err }; }
   componentDidCatch(err, info) { console.error('[Agntdash] Card render error:', err.message, info.componentStack?.split('\n')[1]?.trim()); }
+  // Reset when the underlying code changes (e.g. after a repair/regenerate).
+  componentDidUpdate(prev) { if (prev.renderCode !== this.props.renderCode && this.state.error) this.setState({ error: null }); }
   render() {
     if (this.state.error) {
       return (
@@ -56,11 +59,18 @@ class RenderErrorBoundary extends React.Component {
           <span className="material-symbols-outlined">bug_report</span>
           <div className="err-title">Render Error</div>
           <div className="err-desc">{this.state.error.message}</div>
-          {this.props.onRetry && (
-            <button className="btn btn-secondary btn-sm err-retry" onClick={this.props.onRetry}>
-              <span className="material-symbols-outlined">refresh</span> Retry
-            </button>
-          )}
+          <div style={{ display:'flex', gap:6, marginTop:6 }}>
+            {this.props.onRepair && (
+              <button className="btn btn-primary btn-sm" onClick={() => this.props.onRepair(this.state.error.message)}>
+                <span className="material-symbols-outlined">healing</span> Repair with AI
+              </button>
+            )}
+            {this.props.onRetry && (
+              <button className="btn btn-secondary btn-sm" onClick={this.props.onRetry}>
+                <span className="material-symbols-outlined">refresh</span> Retry
+              </button>
+            )}
+          </div>
           <details style={{ fontSize:9, color:'var(--fg-dim)', marginTop:6, width:'100%' }}>
             <summary style={{ cursor:'pointer' }}>View render code</summary>
             <pre style={{ marginTop:4, whiteSpace:'pre-wrap', wordBreak:'break-all', maxHeight:120, overflow:'auto' }}>{this.props.renderCode}</pre>
@@ -75,7 +85,7 @@ class RenderErrorBoundary extends React.Component {
 /* ─── UNIVERSAL LLM RENDERER ─── */
 // renderCode is a function declaration string: function CardRenderer({data, renderSpec}) { ... }
 // new Function creates a real React component so React.useState / React.useEffect work.
-function LLMCardRenderer({ card, onRetry }) {
+function LLMCardRenderer({ card, onRetry, onRepair }) {
   const { data, renderSpec, renderCode } = card;
 
   if (!renderCode) {
@@ -95,19 +105,25 @@ function LLMCardRenderer({ card, onRetry }) {
 
   let Comp;
   try {
-    // eslint-disable-next-line no-new-func
-    Comp = new Function('React', 'return (' + renderCode + ')')(React);
+    Comp = compileRenderCode(renderCode);
   } catch (parseErr) {
     return (
       <div className="card-error">
         <span className="material-symbols-outlined">syntax_error</span>
-        <div className="err-title">Syntax Error</div>
+        <div className="err-title">Compile Error</div>
         <div className="err-desc">{parseErr.message}</div>
-        {onRetry && (
-          <button className="btn btn-secondary btn-sm err-retry" onClick={onRetry}>
-            <span className="material-symbols-outlined">refresh</span> Retry
-          </button>
-        )}
+        <div style={{ display:'flex', gap:6, marginTop:6 }}>
+          {onRepair && (
+            <button className="btn btn-primary btn-sm" onClick={() => onRepair(parseErr.message)}>
+              <span className="material-symbols-outlined">healing</span> Repair with AI
+            </button>
+          )}
+          {onRetry && (
+            <button className="btn btn-secondary btn-sm" onClick={onRetry}>
+              <span className="material-symbols-outlined">refresh</span> Retry
+            </button>
+          )}
+        </div>
         <details style={{ fontSize:9, color:'var(--fg-dim)', marginTop:6, width:'100%' }}>
           <summary style={{ cursor:'pointer' }}>View render code</summary>
           <pre style={{ marginTop:4, whiteSpace:'pre-wrap', wordBreak:'break-all', maxHeight:120, overflow:'auto' }}>{renderCode}</pre>
@@ -117,7 +133,7 @@ function LLMCardRenderer({ card, onRetry }) {
   }
 
   return (
-    <RenderErrorBoundary renderCode={renderCode} onRetry={onRetry}>
+    <RenderErrorBoundary renderCode={renderCode} onRetry={onRetry} onRepair={onRepair}>
       {React.createElement(
         'div',
         { style: { height: '100%', overflow: 'auto', display: 'flex', flexDirection: 'column' } },
@@ -149,7 +165,7 @@ function classifyError(msg = '') {
   return { icon:'warning', title:'Generation Failed', color:'var(--warning)' };
 }
 
-export function CardBody({ card, onRetry }) {
+export function CardBody({ card, onRetry, onRepair }) {
   if (card.loading) {
     return (
       <div className="card-loading">
@@ -177,5 +193,5 @@ export function CardBody({ card, onRetry }) {
       </div>
     );
   }
-  return <LLMCardRenderer card={card} onRetry={onRetry} />;
+  return <LLMCardRenderer card={card} onRetry={onRetry} onRepair={onRepair} />;
 }
