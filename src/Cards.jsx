@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { compileRenderCode } from './transpile.js';
+import { CardStateContext } from './cardState.js';
 
 export function InlineCardCreator({ card, onGenerate, onCancel }) {
   const [val, setVal] = useState('');
@@ -85,8 +86,22 @@ class RenderErrorBoundary extends React.Component {
 /* ─── UNIVERSAL LLM RENDERER ─── */
 // renderCode is a function declaration string: function CardRenderer({data, renderSpec}) { ... }
 // new Function creates a real React component so React.useState / React.useEffect work.
-function LLMCardRenderer({ card, onRetry, onRepair }) {
+function LLMCardRenderer({ card, onRetry, onRepair, onPersistState }) {
   const { data, renderSpec, renderCode } = card;
+
+  // Compile once per renderCode (not every render): a fresh component identity on
+  // each render would remount the subtree and wipe interactive state.
+  const compiled = React.useMemo(() => {
+    if (!renderCode) return { Comp: null, error: null };
+    try { return { Comp: compileRenderCode(renderCode), error: null }; }
+    catch (err) { return { Comp: null, error: err.message }; }
+  }, [renderCode]);
+
+  // Stable persistence bridge for useCardState (state lives on the card).
+  const stateCtx = React.useMemo(() => ({
+    state: card.state || {},
+    persist: (key, value) => onPersistState && onPersistState(card.id, key, value),
+  }), [card.state, card.id, onPersistState]);
 
   if (!renderCode) {
     return (
@@ -103,18 +118,15 @@ function LLMCardRenderer({ card, onRetry, onRepair }) {
     );
   }
 
-  let Comp;
-  try {
-    Comp = compileRenderCode(renderCode);
-  } catch (parseErr) {
+  if (compiled.error) {
     return (
       <div className="card-error">
         <span className="material-symbols-outlined">syntax_error</span>
         <div className="err-title">Compile Error</div>
-        <div className="err-desc">{parseErr.message}</div>
+        <div className="err-desc">{compiled.error}</div>
         <div style={{ display:'flex', gap:6, marginTop:6 }}>
           {onRepair && (
-            <button className="btn btn-primary btn-sm" onClick={() => onRepair(parseErr.message)}>
+            <button className="btn btn-primary btn-sm" onClick={() => onRepair(compiled.error)}>
               <span className="material-symbols-outlined">healing</span> Repair with AI
             </button>
           )}
@@ -132,13 +144,16 @@ function LLMCardRenderer({ card, onRetry, onRepair }) {
     );
   }
 
+  const { Comp } = compiled;
   return (
     <RenderErrorBoundary renderCode={renderCode} onRetry={onRetry} onRepair={onRepair}>
-      {React.createElement(
-        'div',
-        { style: { height: '100%', overflow: 'auto', display: 'flex', flexDirection: 'column' } },
-        React.createElement(Comp, { data, renderSpec })
-      )}
+      <CardStateContext.Provider value={stateCtx}>
+        {React.createElement(
+          'div',
+          { style: { height: '100%', overflow: 'auto', display: 'flex', flexDirection: 'column' } },
+          React.createElement(Comp, { data, renderSpec })
+        )}
+      </CardStateContext.Provider>
     </RenderErrorBoundary>
   );
 }
@@ -165,7 +180,7 @@ function classifyError(msg = '') {
   return { icon:'warning', title:'Generation Failed', color:'var(--warning)' };
 }
 
-export function CardBody({ card, onRetry, onRepair }) {
+export function CardBody({ card, onRetry, onRepair, onPersistState }) {
   if (card.loading) {
     return (
       <div className="card-loading">
@@ -193,5 +208,5 @@ export function CardBody({ card, onRetry, onRepair }) {
       </div>
     );
   }
-  return <LLMCardRenderer card={card} onRetry={onRetry} onRepair={onRepair} />;
+  return <LLMCardRenderer card={card} onRetry={onRetry} onRepair={onRepair} onPersistState={onPersistState} />;
 }

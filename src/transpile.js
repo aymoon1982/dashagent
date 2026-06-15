@@ -1,6 +1,7 @@
 import * as Babel from '@babel/standalone';
 import React from 'react';
 import { safeFetch } from './dataLayer.js';
+import { useCardState } from './cardState.js';
 
 /*
  * Compiles an LLM-authored CardRenderer into a live React component.
@@ -38,8 +39,8 @@ export function compileRenderCode(renderCode) {
   // the Function constructor. So even an injected component can't reach the keys.
   // NOTE: hardening, not a true sandbox — a determined constructor-chain escape is
   // still possible; a worker/iframe realm or backend proxy is the complete fix.
-  const factory = new Function('fetch', ...SHADOWED_GLOBALS, 'React', `"use strict";\n${transformed}\nreturn CardRenderer;`);
-  const Comp = factory(safeFetch, ...SHADOWED_GLOBALS.map(() => undefined), React);
+  const factory = new Function('fetch', 'useCardState', ...SHADOWED_GLOBALS, 'React', `"use strict";\n${transformed}\nreturn CardRenderer;`);
+  const Comp = factory(safeFetch, useCardState, ...SHADOWED_GLOBALS.map(() => undefined), React);
   if (typeof Comp !== 'function') {
     throw new Error('renderCode did not define a CardRenderer function');
   }

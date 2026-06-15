@@ -101,6 +101,7 @@ For sources NOT on the allowlist (specific equities like AAPL, paywalled news): 
 1. Named exactly \`CardRenderer\`, takes \`{ data, renderSpec }\`.
 2. WRITE JSX (<div>, <svg>, <img>, <table>…). It is transpiled for you. Do NOT hand-write React.createElement.
 3. Hooks via \`React.useState/useEffect/useRef\` (\`React\` is in scope; no imports). \`fetch\` is available (allowlisted + auto-timeout) for option B. Storage/window/document are NOT available — keep components free of those.
+   - PERSISTENCE: for ANY state the user should keep across reloads (checklist ticks, notes text, counters, toggles, selected tab), use \`useCardState(key, initial)\` instead of React.useState. Same API as useState ([value, setValue]) but it is saved with the card. Use plain React.useState only for ephemeral UI (hover, transient input).
 4. No external libraries. Build charts with inline SVG. Images via <img src=…> are fine (e.g. flags, Wikimedia/Unsplash URLs returned in data).
 5. Inline styles only (\`style={{ }}\`); you may use the CSS variables below.
 6. Return ONE root element filling its container: root style \`{ height: '100%', display: 'flex', flexDirection: 'column' }\` (for bleed cards, also set margin/padding 0 and let media use width/height 100% with objectFit cover).
@@ -441,6 +442,7 @@ Rules: 1–${max} cards. Prefer 1 unless the request clearly spans distinct data
       group: getGroup(),
       cols, rows,
       sizeLocked: existingCardId ? (cards.find(c=>c.id===existingCardId)?.sizeLocked || false) : false,
+      state: existingCardId ? (cards.find(c=>c.id===existingCardId)?.state || {}) : {},
       data,
       renderSpec: payload.renderSpec || {},
       renderCode: check.ok ? payload.renderCode : (payload.renderCode || null),
@@ -538,6 +540,11 @@ Rules: 1–${max} cards. Prefer 1 unless the request clearly spans distinct data
 
   const handleToggleSizeLock = (cardId) =>
     setCards(prev => prev.map(c => c.id===cardId ? {...c, sizeLocked: !c.sizeLocked} : c));
+
+  // Persist a generated component's interactive state (checklist ticks, notes…)
+  // into the card so it survives reloads, via the useCardState hook.
+  const handlePersistState = (cardId, key, value) =>
+    setCards(prev => prev.map(c => c.id===cardId ? { ...c, state: { ...(c.state || {}), [key]: value } } : c));
 
   const handleSaveTemplate = (cardId) => {
     const card = cards.find(c => c.id===cardId);
@@ -727,6 +734,7 @@ Rules: 1–${max} cards. Prefer 1 unless the request clearly spans distinct data
     onDuplicate: handleDuplicateCard,
     onSaveTemplate: handleSaveTemplate,
     onToggleSizeLock: handleToggleSizeLock,
+    onPersistState: handlePersistState,
     onRepair: handleRepairCard,
     onDelete: handleDeleteCard,
     onMove: handleMoveCardGroup,

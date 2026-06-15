@@ -188,7 +188,7 @@ function CardWrapper({ card, group, groups, handlers, isEditing, editPromptValue
           <div className={`card-bd${bleed ? ' card-bd--bleed' : ''}`}>
             {card.isCreating
               ? <InlineCardCreator card={card} onGenerate={handlers.onGenerate} onCancel={handlers.onCancel} />
-              : <CardBody card={card} onRetry={() => handlers.onRegenerate(card.id)} onRepair={(msg) => handlers.onRepair(card.id, msg)} />
+              : <CardBody card={card} onRetry={() => handlers.onRegenerate(card.id)} onRepair={(msg) => handlers.onRepair(card.id, msg)} onPersistState={handlers.onPersistState} />
             }
           </div>
 
