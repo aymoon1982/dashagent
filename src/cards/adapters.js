@@ -122,6 +122,81 @@ export const ADAPTERS = {
     const raw = arr(data[spec.source]);
     return { rows: raw };
   },
+
+  /* Open-Meteo air quality (path=current) -> gauge */
+  air_quality: (data, spec) => {
+    const raw = data[spec.source] || {};
+    if (isErr(raw)) return { value: 0, error: raw.__error };
+    const aqi = num(raw.us_aqi, 0);
+    const band = aqi <= 50 ? 'Good' : aqi <= 100 ? 'Moderate' : aqi <= 150 ? 'Unhealthy (sensitive)' : 'Unhealthy';
+    return { value: aqi, max: 200, label: spec.props?.label || `US AQI · ${band}` };
+  },
+
+  /* CoinGecko trending (path=coins) -> table rows */
+  crypto_trending: (data, spec) => {
+    const coins = arr(data[spec.source]).map((c, i) => {
+      const it = c.item || c;
+      return { rank: i + 1, name: it.name || '—', symbol: (it.symbol || '').toUpperCase() };
+    });
+    return { columns: [{ key: 'rank', label: '#' }, { key: 'name', label: 'Coin' }, { key: 'symbol', label: 'Symbol' }], rows: coins };
+  },
+
+  /* GitHub repo search (path=items) -> news-style feed */
+  github_list: (data, spec) => {
+    const items = arr(data[spec.source]).slice(0, spec.props?.limit || 12).map(r => ({
+      title: r.full_name || r.name || 'repo',
+      url: r.html_url || null,
+      source: r.stargazers_count != null ? `★ ${Number(r.stargazers_count).toLocaleString()}` : (r.language || ''),
+      time: null, image: null,
+    }));
+    return { items };
+  },
+
+  /* GitHub single repo (path=null) -> kpi group */
+  github_stats: (data, spec) => {
+    const r = data[spec.source] || {};
+    if (isErr(r)) return { stats: [], error: r.__error };
+    return { stats: [
+      { label: 'Stars', value: num(r.stargazers_count, 0) },
+      { label: 'Forks', value: num(r.forks_count, 0) },
+      { label: 'Open issues', value: num(r.open_issues_count, 0) },
+    ] };
+  },
+
+  /* RestCountries (path='0') -> flag image */
+  country_flag: (data, spec) => {
+    const c = data[spec.source] || {};
+    if (isErr(c)) return { src: '', error: c.__error };
+    return { src: c.flags?.png || c.flags?.svg || '', caption: c.name?.common || spec.props?.caption || '' };
+  },
+
+  /* Wikipedia summary (path=null) -> note text */
+  wiki: (data, spec) => {
+    const w = data[spec.source] || {};
+    if (isErr(w)) return { text: w.__error };
+    return { text: w.extract || 'No summary available.' };
+  },
+
+  /* Google Calendar (path=null) -> timeline events */
+  calendar_events: (data, spec) => {
+    const items = arr((data[spec.source] || {}).items).slice(0, spec.props?.limit || 10);
+    const events = items.map(e => {
+      const when = e.start?.dateTime || e.start?.date || '';
+      let time = when;
+      try { time = when ? new Date(when).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' }) : ''; } catch { /* keep raw */ }
+      return { time, title: e.summary || '(busy)', sub: e.location || '' };
+    });
+    return { events };
+  },
+
+  /* Google Tasks (path=null) -> checklist */
+  tasks_list: (data, spec) => {
+    const items = arr((data[spec.source] || {}).items)
+      .filter(t => t && t.title)
+      .slice(0, spec.props?.limit || 15)
+      .map(t => ({ text: t.title, sub: t.due ? `Due ${String(t.due).slice(0, 10)}` : '', id: t.id }));
+    return { items, checklist: true };
+  },
 };
 
 /* Apply a spec's named adapter (if any) to resolved data, returning final props. */

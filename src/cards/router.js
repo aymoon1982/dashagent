@@ -44,7 +44,7 @@ ${PROVIDER_CATALOG}
 ## Rules
 1. "type" MUST be one of: ${CARD_TYPE_IDS.join(', ')}.
 2. Prefer LIVE (provider + adapter) for prices, weather, FX, news, indicators. Use STATIC props for personal/work data, conversions, countdowns, checklists.
-3. Match adapter to provider: crypto_price↔crypto_price provider, crypto_history↔crypto_history, fx_table↔fx_table, fx_history↔fx_history, weather↔weather, news_list↔hn_news/news, worldbank_series↔world_bank, stock_history/stock_quote↔stock_* (need proxy).
+3. Match adapter to provider: crypto_price↔crypto_price, crypto_history↔crypto_history, crypto_trending↔crypto_trending, fx_table↔fx_table, fx_history↔fx_history, weather↔weather, air_quality↔air_quality, news_list↔hn_news/news, github_list↔github_trending, github_stats↔github_repo, worldbank_series↔world_bank, country_flag↔country, wiki↔wiki_summary, calendar_events↔my_calendar, tasks_list↔my_tasks, stock_history/stock_quote↔stock_* (need proxy). Pick the card type the adapter feeds: crypto_trending/crypto→table, air_quality→gauge, github_list→news, github_stats→kpi_group, country_flag→image, wiki→note, calendar_events→timeline, tasks_list→list.
 4. Size to content: a single number ~3x2, a chart ~7x3, a wide table/feed ~6x4.
 5. For images use type "image" with chrome:"none", bleed:true.
 6. Never invent precise live numbers in props — use a provider, or clearly-labeled "(sample)" data.
