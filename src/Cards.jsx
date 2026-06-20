@@ -1,6 +1,11 @@
 import React, { useState } from 'react';
-import { compileRenderCode } from './transpile.js';
 import { CardStateContext } from './cardState.js';
+import { SpecCard } from './cards/index.js';
+
+// Legacy LLM-authored renderCode is the rare escape hatch now, so its heavy Babel
+// transpiler is loaded on demand — it never weighs down the default bundle.
+let _transpilePromise = null;
+const loadTranspile = () => (_transpilePromise = _transpilePromise || import('./transpile.js'));
 
 export function InlineCardCreator({ card, onGenerate, onCancel }) {
   const [val, setVal] = useState('');
@@ -90,11 +95,20 @@ function LLMCardRenderer({ card, onRetry, onRepair, onPersistState }) {
   const { data, renderSpec, renderCode } = card;
 
   // Compile once per renderCode (not every render): a fresh component identity on
-  // each render would remount the subtree and wipe interactive state.
-  const compiled = React.useMemo(() => {
-    if (!renderCode) return { Comp: null, error: null };
-    try { return { Comp: compileRenderCode(renderCode), error: null }; }
-    catch (err) { return { Comp: null, error: err.message }; }
+  // each render would remount the subtree and wipe interactive state. The Babel
+  // transpiler loads lazily, so we track a loading state while it arrives.
+  const [compiled, setCompiled] = React.useState({ Comp: null, error: null, loading: !!renderCode });
+  React.useEffect(() => {
+    if (!renderCode) return; // initial state already reflects the no-code case
+    let alive = true;
+    loadTranspile()
+      .then(({ compileRenderCode }) => {
+        if (!alive) return;
+        try { setCompiled({ Comp: compileRenderCode(renderCode), error: null, loading: false }); }
+        catch (err) { setCompiled({ Comp: null, error: err.message, loading: false }); }
+      })
+      .catch(err => { if (alive) setCompiled({ Comp: null, error: err.message, loading: false }); });
+    return () => { alive = false; };
   }, [renderCode]);
 
   // Stable persistence bridge for useCardState (state lives on the card).
@@ -140,6 +154,14 @@ function LLMCardRenderer({ card, onRetry, onRepair, onPersistState }) {
           <summary style={{ cursor:'pointer' }}>View render code</summary>
           <pre style={{ marginTop:4, whiteSpace:'pre-wrap', wordBreak:'break-all', maxHeight:120, overflow:'auto' }}>{renderCode}</pre>
         </details>
+      </div>
+    );
+  }
+
+  if (compiled.loading || (!compiled.Comp && !compiled.error)) {
+    return (
+      <div className="card-loading">
+        <span className="material-symbols-outlined spinning" style={{ fontSize:22, color:'var(--primary)', opacity:0.7 }}>progress_activity</span>
       </div>
     );
   }
@@ -208,5 +230,8 @@ export function CardBody({ card, onRetry, onRepair, onPersistState }) {
       </div>
     );
   }
+  // New default path: declarative spec → typed, library-backed component (no eval).
+  if (card.spec) return <SpecCard card={card} onRetry={onRetry} onPersistState={onPersistState} />;
+  // Legacy escape hatch: LLM-authored renderCode (kept for the bespoke long tail).
   return <LLMCardRenderer card={card} onRetry={onRetry} onRepair={onRepair} onPersistState={onPersistState} />;
 }

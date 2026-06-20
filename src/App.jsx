@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { AppHeader, SettingsDrawer, PipelineView } from './UI.jsx';
 import { DashboardView } from './Dashboard.jsx';
-import { validateRenderCode } from './transpile.js';
 import { resolveBindings, bindingsRefreshInterval, ALLOWED_HOSTS, PROVIDER_CATALOG, setProxyBase } from './dataLayer.js';
+import { SPEC_SYSTEM_PROMPT, buildSpecUserMessage, normalizeSpec, matchTemplate, instantiateTemplate } from './cards/index.js';
 import { setActionDispatcher } from './actions.js';
 
 /* ─── CONSTANTS ─── */
@@ -323,9 +323,32 @@ Rules: 1–${max} cards. Prefer 1 unless the request clearly spans distinct data
   const runAgentPipeline = async (promptText, existingCardId = null, forcedGroup = null, planContext = '', refine = null) => {
     const { key } = getProviderConn();
     const getGroup = () => forcedGroup || (existingCardId ? (cards.find(c=>c.id===existingCardId)?.group || 'Personal') : 'Personal');
-    const sizeToGrid = size => size==='xs'?{cols:3,rows:1}:size==='sm'?{cols:4,rows:2}:size==='md'?{cols:6,rows:2}:size==='lg'?{cols:6,rows:3}:{cols:12,rows:3};
-    const clamp = (n, lo, hi, def) => { const v = Math.round(Number(n)); return Number.isFinite(v) ? Math.max(lo, Math.min(hi, v)) : def; };
     const llm = (model, messages, temp = 0.3, maxTokens = 8000) => callLLM(model, messages, temp, maxTokens);
+
+    // Instant tier (zero LLM): a recognized common request maps straight to a
+    // predefined card from the library. We still resolve its live bindings here.
+    if (!refine) {
+      const tpl = matchTemplate(promptText);
+      if (tpl) {
+        const card = instantiateTemplate(tpl, existingCardId || undefined);
+        const prev = existingCardId ? cards.find(c=>c.id===existingCardId) : null;
+        let liveData = {};
+        if (card.dataBindings.length) {
+          try { liveData = await resolveBindings(card.dataBindings); }
+          catch (e) { console.warn('[Agntdash] template binding resolve failed:', e.message); }
+        }
+        return {
+          ...card,
+          group: getGroup(),
+          refreshInterval: bindingsRefreshInterval(card.dataBindings),
+          sizeLocked: prev?.sizeLocked || false,
+          state: prev?.state || {},
+          data: { ...(card.data || {}), ...liveData },
+          lastFetched: new Date().toISOString(),
+          loading: false, error: null,
+        };
+      }
+    }
 
     if (!key) throw new Error('No API key configured. Open Settings to connect an LLM provider.');
 
@@ -370,16 +393,17 @@ Rules: 1–${max} cards. Prefer 1 unless the request clearly spans distinct data
       } catch (e) { console.warn('Tavily search failed:', e); }
     }
 
-    // Stage 3: Code generation (smart model) — no response_format for max model compatibility
+    // Stage 3: SPEC generation (smart model). The model picks ONE catalog card
+    // type and fills props (or names a provider binding + adapter for live data).
+    // It writes NO code — the host renders a pre-built, tested component. Output is
+    // small and schema-validated, so this path is fast and rarely fails. There is
+    // no in-browser transpilation or eval anymore.
     const userPref = workflowConfig.userSystemPrompt?.trim();
-    const sysContent = FIXED_SYSTEM_PROMPT + (userPref ? `\n\n---\n## User Preferences\n${userPref}` : '');
-    const userMsg = (searchContext
-      ? `User request: ${promptText}\n\nLive search results (use as primary data source):\n${searchContext}`
-      : `User request: ${promptText}`) + (planContext || '');
+    const sysContent = SPEC_SYSTEM_PROMPT + (userPref ? `\n\n---\n## User Preferences\n${userPref}` : '');
+    const userMsg = buildSpecUserMessage(promptText, { searchContext, planContext });
 
-    // Helper: call Stage 3 and return parsed payload
-    const callStage3 = async (messages) => {
-      const res = await llm(modelSmart, messages, workflowConfig.plannerTemp || 0.3);
+    const callSpec = async (messages) => {
+      const res = await llm(modelSmart, messages, workflowConfig.plannerTemp || 0.3, 1500);
       if (!res.ok) {
         let detail = res.statusText;
         try {
@@ -388,86 +412,64 @@ Rules: 1–${max} cards. Prefer 1 unless the request clearly spans distinct data
         } catch (_) {
           detail = (await res.text().catch(() => '')).slice(0, 200) || res.statusText;
         }
-        throw new Error(`[Stage 3 / ${modelSmart}] HTTP ${res.status}: ${detail}`);
+        throw new Error(`[Router / ${modelSmart}] HTTP ${res.status}: ${detail}`);
       }
       const raw = await res.json();
       const content = raw.choices?.[0]?.message?.content;
-      if (!content) throw new Error(`[Stage 3 / ${modelSmart}] Model returned an empty response. The model may have refused or hit its context limit. Try a different prompt or model.`);
+      if (!content) throw new Error(`[Router / ${modelSmart}] Model returned an empty response. Try a different prompt or model.`);
       return extractJSON(content);
     };
 
     const baseMessages = refine
       ? [
           { role:'system', content: sysContent },
-          { role:'user', content: `Existing card for the request: ${promptText}` },
-          { role:'assistant', content: JSON.stringify(refine.prior || {}) },
-          { role:'user', content: `Modify this card per the instruction and return the COMPLETE updated JSON object (same schema). Keep everything that still applies; change only what the instruction asks.\n\nInstruction: ${refine.instruction}` },
+          { role:'user', content: `Existing card spec for the request: ${promptText}` },
+          { role:'assistant', content: JSON.stringify(refine.prior?.spec || refine.prior || {}) },
+          { role:'user', content: `Modify this card spec per the instruction and return the COMPLETE updated JSON spec (same schema). Keep everything that still applies; change only what the instruction asks.\n\nInstruction: ${refine.instruction}` },
         ]
       : [{ role:'system', content: sysContent }, { role:'user', content: userMsg }];
-    let payload = await callStage3(baseMessages);
 
-    // Validate the JSX renderCode by actually transpiling it. On failure, do one
-    // automatic repair round-trip feeding the exact compiler error back to the model.
-    let check = validateRenderCode(payload.renderCode);
-    if (!check.ok) {
-      console.warn('[Agntdash] renderCode failed to compile, attempting auto-repair:', check.error);
+    let norm = normalizeSpec(await callSpec(baseMessages));
+    // One cheap repair round-trip only if the type itself was invalid/missing.
+    if (!norm.spec) {
       try {
-        payload = await callStage3([
+        norm = normalizeSpec(await callSpec([
           ...baseMessages,
-          { role:'assistant', content: JSON.stringify(payload) },
-          { role:'user', content: `Your renderCode failed to compile with this error:\n\n${check.error}\n\nFix it. Return the COMPLETE corrected JSON object. The component must be named CardRenderer, take { data, renderSpec }, be valid JSX (no imports), and handle null data safely.` }
-        ]);
-        check = validateRenderCode(payload.renderCode);
-      } catch (repairErr) {
-        console.warn('[Agntdash] auto-repair call failed:', repairErr.message);
-      }
+          { role:'user', content: `That was not a valid spec (${norm.error}). Return ONE JSON spec whose "type" is exactly one of the catalog card types, with valid props.` },
+        ]));
+      } catch (e) { console.warn('[Agntdash] spec repair failed:', e.message); }
     }
-    if (!check.ok) {
-      payload.renderSpec = {
-        ...(payload.renderSpec || {}),
-        summary: `Generation error: ${check.error}. Click Retry to regenerate.`
-      };
-    }
+    if (!norm.spec) throw new Error(`Router returned no valid card spec: ${norm.error}`);
+    const spec = norm.spec;
 
-    // Agentic sizing: prefer the model's direct cols/rows; fall back to size enum.
-    const fallback = sizeToGrid(payload.size || 'md');
-    const cols = clamp(payload.cols, 1, 12, fallback.cols);
-    const rows = clamp(payload.rows, 1, 8, fallback.rows);
-
-    // Frame: agent-controlled chrome + bleed.
-    const chrome = ['full','minimal','none'].includes(payload.chrome) ? payload.chrome : 'full';
-    const bleed = !!payload.bleed;
-
-    // Data: host resolves declarative bindings (no fetching in model code). Merge any
-    // statically-embedded data with the freshly fetched values.
-    const dataBindings = Array.isArray(payload.dataBindings)
-      ? payload.dataBindings.filter(b => b && b.key && (b.url || b.provider)).slice(0, 8)
-      : [];
+    // Data: host resolves the spec's declarative bindings; adapters shape the
+    // result into component props at render time (see SpecCard).
+    const dataBindings = spec.dataBindings || [];
     const refreshInterval = bindingsRefreshInterval(dataBindings);
     let liveData = {};
     if (dataBindings.length) {
       try { liveData = await resolveBindings(dataBindings); }
       catch (e) { console.warn('[Agntdash] binding resolve failed:', e.message); }
     }
-    const data = { ...(payload.data && typeof payload.data === 'object' ? payload.data : {}), ...liveData };
 
+    const prevCard = existingCardId ? cards.find(c=>c.id===existingCardId) : null;
     return {
       id: existingCardId || Math.random().toString(36).slice(2,9),
       prompt: promptText,
-      title: payload.title || 'AI Card',
-      size: payload.size || (cols >= 12 ? 'xl' : cols >= 6 ? (rows >= 3 ? 'lg' : 'md') : rows >= 2 ? 'sm' : 'xs'),
-      chrome, bleed,
-      dataSource: searchUsed ? `Tavily · ${payload.dataSource || 'Web Search'}` : (payload.dataSource || (dataBindings.length ? 'Live API' : 'AI Knowledge')),
+      title: spec.title || 'AI Card',
+      spec,
+      chrome: spec.chrome, bleed: spec.bleed,
+      dataSource: searchUsed ? 'Tavily · Web Search' : (dataBindings.length ? 'Live API' : 'AI'),
       refreshInterval,
       live: dataBindings.length > 0,
       dataBindings,
       group: getGroup(),
-      cols, rows,
-      sizeLocked: existingCardId ? (cards.find(c=>c.id===existingCardId)?.sizeLocked || false) : false,
-      state: existingCardId ? (cards.find(c=>c.id===existingCardId)?.state || {}) : {},
-      data,
-      renderSpec: payload.renderSpec || {},
-      renderCode: check.ok ? payload.renderCode : (payload.renderCode || null),
+      cols: spec.cols, rows: spec.rows,
+      sizeLocked: prevCard?.sizeLocked || false,
+      state: prevCard?.state || {},
+      data: { ...(spec.props?.data && typeof spec.props.data === 'object' ? spec.props.data : {}), ...liveData },
+      renderSpec: { color: spec.accent, summary: '' },
+      renderCode: null,
       lastFetched: new Date().toISOString(),
       loading: false, error: null,
     };
@@ -490,8 +492,12 @@ Rules: 1–${max} cards. Prefer 1 unless the request clearly spans distinct data
 
     try {
       // Stage 0: planner decides whether this is one card or a coordinated set,
-      // and produces shared design context for the set.
-      const { cards: planCards, plan } = await runDashboardPlanner(promptText);
+      // and produces shared design context for the set. A recognized common
+      // request skips the planner entirely (it becomes a single instant card).
+      const matched = matchTemplate(promptText);
+      const { cards: planCards, plan } = matched
+        ? { cards: [{ prompt: promptText, group: null, title: matched.spec.title, size: null }], plan: null }
+        : await runDashboardPlanner(promptText);
       const fallbackGroup = groups[0]?.name || 'Personal';
 
       // Create a placeholder per planned card so they fill in live and in parallel.
@@ -577,7 +583,7 @@ Rules: 1–${max} cards. Prefer 1 unless the request clearly spans distinct data
       id: Math.random().toString(36).slice(2,9), name: name.trim(),
       prompt: card.prompt, title: card.title, cols: card.cols, rows: card.rows,
       chrome: card.chrome, bleed: card.bleed, dataBindings: card.dataBindings || [],
-      data: card.data, renderSpec: card.renderSpec, renderCode: card.renderCode,
+      data: card.data, renderSpec: card.renderSpec, renderCode: card.renderCode, spec: card.spec,
     };
     setTemplates(prev => [...prev, tpl]);
   };
@@ -591,7 +597,7 @@ Rules: 1–${max} cards. Prefer 1 unless the request clearly spans distinct data
       cols: tpl.cols, rows: tpl.rows, chrome: tpl.chrome, bleed: tpl.bleed,
       dataBindings: tpl.dataBindings || [], refreshInterval: bindingsRefreshInterval(tpl.dataBindings || []),
       live: (tpl.dataBindings || []).length > 0, group, data: tpl.data, renderSpec: tpl.renderSpec,
-      renderCode: tpl.renderCode, dataSource: 'Template', lastFetched: new Date().toISOString(),
+      renderCode: tpl.renderCode, spec: tpl.spec, dataSource: 'Template', lastFetched: new Date().toISOString(),
       loading: false, error: null, sizeLocked: false,
     };
     setCards(prev => [...prev, card]);
@@ -637,6 +643,9 @@ Rules: 1–${max} cards. Prefer 1 unless the request clearly spans distinct data
     if (!card.renderCode) return handleRefreshCard(cardId);
     setCards(prev => prev.map(c => c.id===cardId ? {...c, loading:true, error:null} : c));
     try {
+      // Legacy codegen repair: load the Babel-based validator on demand so the
+      // heavy transpiler stays out of the default bundle.
+      const { validateRenderCode } = await import('./transpile.js');
       const res = await callLLM(modelSmart, [
         { role:'system', content: FIXED_SYSTEM_PROMPT },
         { role:'user', content: `This CardRenderer crashed with the following error:\n\n${errorMessage || 'unknown runtime error'}\n\nCurrent renderCode:\n\n${card.renderCode}\n\nReturn ONLY a JSON object {"renderCode":"<corrected CardRenderer JSX>"}. Keep the same visual intent but add null-checks and guards so it never throws.` }

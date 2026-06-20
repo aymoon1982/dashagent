@@ -283,3 +283,162 @@ Stop asking the LLM to *write the card*; give it a **library of great cards** an
 ask it only to *pick and fill one*. Predefined typed cards are the library, the
 LLM is the router, the existing data layer feeds them, and free-form codegen is
 demoted to a sandboxed last resort.
+
+---
+
+# IMPLEMENTATION (built)
+
+The architecture above is now implemented. Summary of what shipped on this branch.
+
+## Engine (`src/cards/`)
+
+| Module | Role |
+|--------|------|
+| `theme.js` | Shared palette token. |
+| `charts.jsx` | **Recharts**-backed chart catalog: line, area, bar, stacked bar, pie/donut, candlestick, radial gauge, heatmap. Written once, themed, interactive, defensive. |
+| `primitives.jsx` | Non-chart typed cards: KPI, KPI group, table, list/checklist, progress, countdown, converter, timeline, note, news feed, weather, image. State persists via the existing `useCardState`. |
+| `registry.js` | The catalog source of truth: binds each `type` → component + a **Zod** props schema + a one-line summary used to build the router prompt. Adding a card type = one entry. |
+| `adapters.js` | Named, JSON-serializable data transforms (`crypto_history`, `crypto_price`, `fx_table`, `fx_history`, `weather`, `news_list`, `worldbank_series`, `stock_*`, `generic_*`) that turn provider output into component props. Never throw. |
+| `SpecCard.jsx` | The new **default renderer**: spec + resolved data → typed component. No Babel, no `eval`, own error boundary + state bridge. |
+| `templates.js` | **100 predefined cards** (10 categories × 10) as ready-to-render specs — the instant tier. |
+| `router.js` | The single structured-call system prompt (built from the catalog), spec normalization/validation, and the zero-LLM `matchTemplate` instant matcher. |
+| `index.js` | Public surface. |
+
+## How a prompt flows now
+
+1. `matchTemplate(prompt)` — if it hits one of the 100 templates, the card is built and rendered with **zero LLM calls** (planner and pipeline both skipped); only its live bindings are fetched.
+2. Otherwise the **single router call** returns a small validated spec (replacing the old plan→intent→codegen→repair chain). One cheap repair round-trip only if the `type` is invalid.
+3. The existing provider layer resolves `dataBindings`; an adapter shapes the result into props at render time.
+
+## Results against the three complaints
+
+- **Speed.** Default initial bundle dropped **3,785 KB → 818 KB** (gzip 238 KB): `@babel/standalone` (~2.97 MB) is now a lazy `transpile` chunk loaded only if a legacy `renderCode` card renders. Common prompts cost **0 LLM calls**; everything else is one small structured call instead of 3–5.
+- **Graphics.** All charts are Recharts components — consistent axes, tooltips, legends, responsiveness — instead of per-card hand-drawn SVG.
+- **Errors.** No in-browser transpile/`eval` on the default path; specs are Zod-validated and components are pre-tested and null-safe, so the compile/runtime error class is largely gone. The old codegen survives only as a sandboxed-style escape hatch (`card.spec` absent → legacy renderer).
+
+## Library decision
+
+- **Recharts 3.x** for charts (added). **shadcn/ui** was *not* adopted: it requires a Tailwind migration this CSS-variable-themed app doesn't use; instead the primitives are built against the existing design tokens for visual consistency with zero migration risk. Recommend revisiting shadcn only if the app moves to Tailwind.
+
+## Predefined card library — 100 cards (10 categories × 10)
+
+### Finance
+1. **Monthly Budget** — `bar_chart` (static)
+2. **Spending Breakdown** — `pie_chart` (static)
+3. **Net Worth** — `area_chart` (static)
+4. **Savings Goals** — `progress` (static)
+5. **Cash Flow** — `kpi_group` (static)
+6. **Bills This Month** — `list` (static)
+7. **Emergency Fund** — `gauge` (static)
+8. **Debt Payoff** — `progress` (static)
+9. **Subscriptions** — `table` (static)
+10. **USD → EUR** — `converter` (static)
+
+### Crypto
+1. **Bitcoin** — `kpi` (live · crypto_price)
+2. **Bitcoin · 7 Days** — `area_chart` (live · crypto_history)
+3. **Ethereum · 7 Days** — `line_chart` (live · crypto_history)
+4. **Crypto Allocation** — `pie_chart` (static)
+5. **Bitcoin · 30 Days** — `area_chart` (live · crypto_history)
+6. **Ethereum** — `kpi` (live · crypto_price)
+7. **Solana** — `kpi` (live · crypto_price)
+8. **Fear & Greed** — `gauge` (static)
+9. **Solana · 7 Days** — `line_chart` (live · crypto_history)
+10. **Holdings ($)** — `bar_chart` (static)
+
+### Markets
+1. **S&P 500 (sample)** — `area_chart` (static)
+2. **Watchlist (sample)** — `table` (static)
+3. **Asset Allocation** — `pie_chart` (static)
+4. **Sector Performance (sample)** — `bar_chart` (static)
+5. **US GDP** — `line_chart` (live · worldbank_series)
+6. **Top Movers (sample)** — `bar_chart` (static)
+7. **Dividends (sample)** — `table` (static)
+8. **P/E Ratios (sample)** — `bar_chart` (static)
+9. **Indexes (sample)** — `kpi_group` (static)
+10. **Earnings (sample)** — `timeline` (static)
+
+### Weather
+1. **London** — `weather` (live · weather)
+2. **New York** — `weather` (live · weather)
+3. **Tokyo** — `weather` (live · weather)
+4. **Paris** — `weather` (live · weather)
+5. **Air Quality (sample)** — `gauge` (static)
+6. **Forecast** — `weather` (live · weather)
+7. **Rain Probability (sample)** — `bar_chart` (static)
+8. **Temperature (sample)** — `line_chart` (static)
+9. **Sun (sample)** — `kpi_group` (static)
+10. **Weekend** — `weather` (live · weather)
+
+### News
+1. **Tech News** — `news` (live · news_list)
+2. **AI News** — `news` (live · news_list)
+3. **World (HN)** — `news` (live · news_list)
+4. **Startup News** — `news` (live · news_list)
+5. **Crypto News** — `news` (live · news_list)
+6. **Science News** — `news` (live · news_list)
+7. **Dev News** — `news` (live · news_list)
+8. **Morning Digest** — `news` (live · news_list)
+9. **Trending (sample)** — `bar_chart` (static)
+10. **Topics to Watch** — `list` (static)
+
+### Personal
+1. **Today** — `list` (static)
+2. **Habits (4 weeks)** — `heatmap` (static)
+3. **Today** — `timeline` (static)
+4. **Focus Goals** — `progress` (static)
+5. **Reading List** — `list` (static)
+6. **Quick Note** — `note` (static)
+7. **Birthday** — `countdown` (static)
+8. **2026 Goals** — `progress` (static)
+9. **Mood (1-5)** — `bar_chart` (static)
+10. **Shopping** — `list` (static)
+
+### Health
+1. **Workout** — `list` (static)
+2. **Steps** — `area_chart` (static)
+3. **Hydration** — `progress` (static)
+4. **Macros** — `pie_chart` (static)
+5. **Weight** — `line_chart` (static)
+6. **Sleep (h)** — `bar_chart` (static)
+7. **HR Zones (min)** — `bar_chart` (static)
+8. **BMI** — `gauge` (static)
+9. **Activity (min/day)** — `heatmap` (static)
+10. **Fitness Goals** — `progress` (static)
+
+### Work
+1. **KPIs (sample)** — `kpi_group` (static)
+2. **Revenue (sample)** — `area_chart` (static)
+3. **Funnel (sample)** — `bar_chart` (static)
+4. **Roadmap (sample)** — `timeline` (static)
+5. **Sprint Tasks** — `list` (static)
+6. **Team Capacity** — `progress` (static)
+7. **Churn** — `kpi` (static)
+8. **Expenses (sample)** — `pie_chart` (static)
+9. **OKRs** — `progress` (static)
+10. **Meetings** — `timeline` (static)
+
+### Travel
+1. **Next Trip** — `countdown` (static)
+2. **Packing** — `list` (static)
+3. **Destination** — `weather` (live · weather)
+4. **Itinerary** — `timeline` (static)
+5. **Trip Budget** — `pie_chart` (static)
+6. **USD Exchange Rates** — `table` (live · fx_table)
+7. **Japan (sample)** — `kpi_group` (static)
+8. **Miles → Km** — `converter` (static)
+9. **Time Zones** — `table` (static)
+10. **Bucket List** — `list` (static)
+
+### Utilities
+1. **Miles → Km** — `converter` (static)
+2. **USD Rates (live)** — `table` (live · fx_table)
+3. **Kg → Lb** — `converter` (static)
+4. **World Population** — `line_chart` (live · worldbank_series)
+5. **US GDP** — `area_chart` (live · worldbank_series)
+6. **New Year** — `countdown` (static)
+7. **Scratchpad** — `note` (static)
+8. **EUR/USD** — `line_chart` (live · fx_history)
+9. **°C → °F (×1.8, +32 approx)** — `converter` (static)
+10. **Note** — `note` (static)
+
