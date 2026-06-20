@@ -48,7 +48,47 @@ ${PROVIDER_CATALOG}
 4. Size to content: a single number ~3x2, a chart ~7x3, a wide table/feed ~6x4.
 5. For images use type "image" with chrome:"none", bleed:true.
 6. Never invent precise live numbers in props — use a provider, or clearly-labeled "(sample)" data.
-7. Keep props minimal and valid for the chosen type.`;
+7. Keep props minimal and valid for the chosen type.
+8. Use "composite" only when one type truly isn't enough (e.g. a headline number AND its trend). Prefer a single type otherwise.
+
+## Examples
+Request: "bitcoin price this week as a chart"
+{"type":"area_chart","title":"Bitcoin · 7 Days","cols":7,"rows":3,"accent":"#f59e0b","dataBindings":[{"key":"btc","provider":"crypto_history","params":{"id":"bitcoin","vs":"usd","days":7}}],"adapter":"crypto_history","source":"btc","props":{"yLabel":"BTC/USD"}}
+
+Request: "convert 50 miles to km"
+{"type":"converter","title":"Miles → Km","cols":4,"rows":2,"accent":"#06b6d4","props":{"factor":1.60934,"fromUnit":"mi","toUnit":"km","base":50}}
+
+Request: "my crypto portfolio: 50% btc 30% eth 20% sol"
+{"type":"pie_chart","title":"Crypto Allocation","cols":5,"rows":3,"accent":"#a855f7","props":{"donut":true,"slices":[{"label":"BTC","value":50},{"label":"ETH","value":30},{"label":"SOL","value":20}]}}
+
+Request: "bitcoin overview" (number + trend → composite)
+{"type":"composite","title":"Bitcoin Overview","cols":7,"rows":3,"accent":"#f59e0b","dataBindings":[{"key":"p","provider":"crypto_price","params":{"id":"bitcoin","vs":"usd"}},{"key":"h","provider":"crypto_history","params":{"id":"bitcoin","vs":"usd","days":30}}],"props":{"layout":"grid","children":[{"type":"kpi","adapter":"crypto_price","source":"p","title":"Price","props":{"label":"BTC/USD","vs":"usd","decimals":0}},{"type":"area_chart","adapter":"crypto_history","source":"h","title":"30 days","props":{"yLabel":"USD"}}]}}`;
+
+/*
+ * Dashboard mode: one structured call returns a COHERENT SET of card specs,
+ * replacing the old planner(+N router calls) chain for broad prompts.
+ */
+export const DASHBOARD_SYSTEM_PROMPT = `${SPEC_SYSTEM_PROMPT}
+
+## Dashboard mode (multiple cards in ONE response)
+For a broad request ("set up my finance dashboard", "everything about Tokyo", "my morning briefing"), design a coherent SET of cards. Respond with ONLY:
+{"theme":"short phrase","palette":["#hex","#hex","#hex"],"cards":[ <card spec>, ... ]}
+Each entry of "cards" is a COMPLETE card spec exactly as defined above (type, title, cols, rows, accent, dataBindings, adapter, source, props). Rules:
+- 1 to 6 cards. Prefer the FEWEST that fully answer the request; a focused request is exactly ONE card.
+- No duplicate or overlapping cards. Give complementary sizes (mix one big focal card with smaller stat/list cards) so they tile well on a 12-col grid.
+- Every card's "accent" comes from the shared "palette".`;
+
+/* Parse a dashboard-mode response into normalized specs + shared palette/theme. */
+export function parseDashboardResponse(raw, max = 6) {
+  const list = Array.isArray(raw?.cards) ? raw.cards : (raw && raw.type ? [raw] : []);
+  const specs = list
+    .map(s => normalizeSpec(s))
+    .filter(n => n.spec)
+    .map(n => n.spec)
+    .slice(0, Math.max(1, Math.min(8, max)));
+  const palette = Array.isArray(raw?.palette) ? raw.palette.filter(p => typeof p === 'string').slice(0, 6) : [];
+  return { specs, palette, theme: (raw?.theme || '').toString().slice(0, 120) };
+}
 
 /* Build the per-card user message, optionally with web-search context + plan. */
 export function buildSpecUserMessage(promptText, { searchContext = '', planContext = '' } = {}) {

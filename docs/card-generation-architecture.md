@@ -442,3 +442,72 @@ The architecture above is now implemented. Summary of what shipped on this branc
 9. **°C → °F (×1.8, +32 approx)** — `converter` (static)
 10. **Note** — `note` (static)
 
+
+---
+
+# ITERATION 2 — closing the gap to "seamless"
+
+After the first implementation, five enhancements were added so the engine
+hits the objective end-to-end rather than just on the happy path.
+
+1. **One-shot dashboards** (`runDashboardSpecs` + `DASHBOARD_SYSTEM_PROMPT`).
+   A broad prompt ("set up my finance dashboard") now returns its entire
+   coherent card set — shared palette and complementary sizes — from a
+   **single** structured call, replacing the planner + N-per-card chain. Any
+   failure falls back to the planner path, so reliability never regresses.
+
+2. **Composite cards** (`type: "composite"`). The "most suitable
+   representation" is sometimes a combination — e.g. a price KPI beside its
+   30-day trend. A composite spec nests 2–6 other catalog types (each with its
+   own adapter/source) into one card; `SpecCard` renders them recursively. This
+   is the JSON-UI-grammar idea (Approach C) applied narrowly, without letting
+   the grammar sprawl.
+
+3. **Spec cache** (`cache.js`). Every router result is memoized by normalized
+   prompt in localStorage. A repeated or reworded prompt then renders with **no
+   LLM call**; only its live bindings are refetched. Together with the template
+   tier, a large share of everyday prompts now cost zero model calls.
+
+4. **Few-shot router prompt.** The router system prompt now carries worked
+   examples (live chart, converter, allocation pie, composite) so type and
+   provider selection are more reliable — directly improving "picks the right
+   viz".
+
+5. **Automated tests** (`engine.test.js`, `npm test` via Vitest). 36 tests lock
+   the core invariants: all 100 templates are renderable and reference valid
+   types/adapters, the router only emits valid specs, adapters never throw on
+   empty/error data, the dashboard parser drops bad specs, and the instant tiers
+   behave. This is what keeps the "prompt → reliable card" promise true as the
+   catalog grows.
+
+## Request → render, final flow
+
+```
+prompt
+ ├─ matchTemplate?  ──► instant card (0 LLM)            [templates.js]
+ ├─ getCachedSpec?  ──► cached spec → refetch bindings  [cache.js]   (0 LLM)
+ ├─ orchestrate?    ──► ONE dashboard call → N specs    [runDashboardSpecs]
+ └─ else            ──► ONE router call → 1 spec         [runAgentPipeline]
+        every spec → resolve bindings → adapter → typed component   [SpecCard]
+        (no Babel, no eval; Zod-validated; pre-tested, null-safe components)
+```
+
+## Why this is "seamless" for the stated objective
+
+- **Fast:** the common case is 0 LLM calls (template/cache); broad dashboards
+  are 1 call; the default JS bundle is ~820 KB (Babel lazy-loaded).
+- **Good-looking:** every chart is a Recharts component; primitives share the
+  app's design tokens; composites cover mixed representations.
+- **Reliable:** no in-browser codegen on the default path, schema-validated
+  specs, defensive components, and a test suite guarding the invariants.
+- **Broad:** 100 predefined cards across 10 life/work domains, plus an open
+  router that maps any prompt onto the same typed catalog.
+
+## Remaining optional follow-ups (not blocking the objective)
+
+- Re-introduce codegen as a **sandboxed** `custom` tier (iframe/worker) for the
+  rare bespoke long tail — currently the only unsafe path, kept lazy and rarely
+  hit.
+- **Semantic** template matching (embeddings) to catch paraphrases the keyword
+  matcher misses.
+- A **settings toggle** to force spec-only mode and fully retire legacy codegen.

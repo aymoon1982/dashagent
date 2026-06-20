@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { AppHeader, SettingsDrawer, PipelineView } from './UI.jsx';
 import { DashboardView } from './Dashboard.jsx';
 import { resolveBindings, bindingsRefreshInterval, ALLOWED_HOSTS, PROVIDER_CATALOG, setProxyBase } from './dataLayer.js';
-import { SPEC_SYSTEM_PROMPT, buildSpecUserMessage, normalizeSpec, matchTemplate, instantiateTemplate } from './cards/index.js';
+import { SPEC_SYSTEM_PROMPT, DASHBOARD_SYSTEM_PROMPT, parseDashboardResponse, buildSpecUserMessage, normalizeSpec, matchTemplate, instantiateTemplate, getCachedSpec, setCachedSpec } from './cards/index.js';
 import { setActionDispatcher } from './actions.js';
 
 /* ─── CONSTANTS ─── */
@@ -350,6 +350,34 @@ Rules: 1–${max} cards. Prefer 1 unless the request clearly spans distinct data
       }
     }
 
+    // Spec cache (zero LLM): a previously generated prompt reuses its spec; only
+    // its live bindings are refetched so the card is fresh without a model call.
+    if (!refine) {
+      const cached = getCachedSpec(promptText);
+      if (cached && cached.type) {
+        const prev = existingCardId ? cards.find(c=>c.id===existingCardId) : null;
+        const dataBindings = cached.dataBindings || [];
+        let liveData = {};
+        if (dataBindings.length) {
+          try { liveData = await resolveBindings(dataBindings); }
+          catch (e) { console.warn('[Agntdash] cached binding resolve failed:', e.message); }
+        }
+        return {
+          id: existingCardId || Math.random().toString(36).slice(2,9),
+          prompt: promptText, title: cached.title || 'AI Card', spec: cached,
+          chrome: cached.chrome || 'full', bleed: !!cached.bleed,
+          dataSource: dataBindings.length ? 'Live API' : 'Cached',
+          refreshInterval: bindingsRefreshInterval(dataBindings),
+          live: dataBindings.length > 0, dataBindings, group: getGroup(),
+          cols: cached.cols || 6, rows: cached.rows || 2,
+          sizeLocked: prev?.sizeLocked || false, state: prev?.state || {},
+          data: { ...(cached.props?.data && typeof cached.props.data === 'object' ? cached.props.data : {}), ...liveData },
+          renderSpec: { color: cached.accent, summary: '' }, renderCode: null,
+          lastFetched: new Date().toISOString(), loading: false, error: null,
+        };
+      }
+    }
+
     if (!key) throw new Error('No API key configured. Open Settings to connect an LLM provider.');
 
     // Stage 1: Intent analysis — does this prompt need live web search? (skipped on refine)
@@ -441,6 +469,8 @@ Rules: 1–${max} cards. Prefer 1 unless the request clearly spans distinct data
     }
     if (!norm.spec) throw new Error(`Router returned no valid card spec: ${norm.error}`);
     const spec = norm.spec;
+    // Remember it so a repeat prompt skips the LLM next time (data still refetched).
+    if (!refine && !searchUsed) setCachedSpec(promptText, spec);
 
     // Data: host resolves the spec's declarative bindings; adapters shape the
     // result into component props at render time (see SpecCard).
@@ -483,6 +513,48 @@ Rules: 1–${max} cards. Prefer 1 unless the request clearly spans distinct data
       : [...prev, { name, color: ACCENT_COLORS[prev.length % ACCENT_COLORS.length], collapsed: false }]);
   };
 
+  /* Turn one spec into a live card (resolving its bindings). Used by the one-shot
+   * dashboard path; the per-card pipeline builds its own card object. */
+  const cardFromSpec = async (spec, group, promptText = '', palette = []) => {
+    const dataBindings = spec.dataBindings || [];
+    let liveData = {};
+    if (dataBindings.length) {
+      try { liveData = await resolveBindings(dataBindings); }
+      catch (e) { console.warn('[Agntdash] binding resolve failed:', e.message); }
+    }
+    const accent = spec.accent || palette[0];
+    return {
+      id: Math.random().toString(36).slice(2,9),
+      prompt: promptText, title: spec.title || 'AI Card', spec: { ...spec, accent },
+      chrome: spec.chrome || 'full', bleed: !!spec.bleed,
+      dataSource: dataBindings.length ? 'Live API' : 'AI',
+      refreshInterval: bindingsRefreshInterval(dataBindings),
+      live: dataBindings.length > 0, dataBindings, group,
+      cols: spec.cols || 6, rows: spec.rows || 2, sizeLocked: false, state: {},
+      data: { ...(spec.props?.data && typeof spec.props.data === 'object' ? spec.props.data : {}), ...liveData },
+      renderSpec: { color: accent, summary: '' }, renderCode: null,
+      lastFetched: new Date().toISOString(), loading: false, error: null,
+    };
+  };
+
+  /* One-shot dashboard: a SINGLE structured call returns the whole coherent set
+   * of card specs (replacing planner + N per-card calls for broad prompts). */
+  const runDashboardSpecs = async (promptText) => {
+    const { key } = getProviderConn();
+    if (!key) throw new Error('No API key configured. Open Settings to connect an LLM provider.');
+    const userPref = workflowConfig.userSystemPrompt?.trim();
+    const sys = DASHBOARD_SYSTEM_PROMPT + (userPref ? `\n\n---\n## User Preferences\n${userPref}` : '');
+    const res = await callLLM(modelSmart, [
+      { role:'system', content: sys },
+      { role:'user', content: `User request: ${promptText}` },
+    ], workflowConfig.plannerTemp || 0.3, 3500);
+    if (!res.ok) throw new Error(`[Dashboard router] HTTP ${res.status}`);
+    const raw = await res.json();
+    const content = raw.choices?.[0]?.message?.content;
+    if (!content) throw new Error('[Dashboard router] empty response');
+    return parseDashboardResponse(extractJSON(content), Math.max(1, Math.min(8, workflowConfig.maxCards || 6)));
+  };
+
   /* ─── HANDLERS ─── */
   const handleAddCard = async (promptText) => {
     if (!isApiConnected) { setIsSettingsOpen(true); return; }
@@ -491,14 +563,44 @@ Rules: 1–${max} cards. Prefer 1 unless the request clearly spans distinct data
     if (workflowConfig.clearOnSubmit) setConsolePrompt('');
 
     try {
-      // Stage 0: planner decides whether this is one card or a coordinated set,
-      // and produces shared design context for the set. A recognized common
-      // request skips the planner entirely (it becomes a single instant card).
       const matched = matchTemplate(promptText);
-      const { cards: planCards, plan } = matched
-        ? { cards: [{ prompt: promptText, group: null, title: matched.spec.title, size: null }], plan: null }
-        : await runDashboardPlanner(promptText);
+      const cached = !matched ? getCachedSpec(promptText) : null;
       const fallbackGroup = groups[0]?.name || 'Personal';
+
+      // FAST PATH: one-shot dashboard. A broad, uncached, unmatched prompt gets its
+      // entire coherent card set from ONE structured call. Any failure falls through
+      // to the planner path below, so reliability never regresses.
+      if (!matched && !cached && workflowConfig.orchestrate) {
+        try {
+          const { specs, palette } = await runDashboardSpecs(promptText);
+          if (specs.length) {
+            ensureGroup(fallbackGroup);
+            const items = specs.map(s => ({ s, tempId: Math.random().toString(36).slice(2,9) }));
+            setCards(prev => [
+              ...prev,
+              ...items.map(({ s, tempId }) => ({ id: tempId, prompt: promptText, title: s.title || 'Analyzing…', cols: s.cols || 6, rows: s.rows || 2, group: fallbackGroup, loading: true, error: null })),
+            ]);
+            await Promise.all(items.map(async ({ s, tempId }) => {
+              try {
+                const card = await cardFromSpec(s, fallbackGroup, promptText, palette);
+                setCards(prev => prev.map(c => c.id===tempId ? { ...card, id: tempId } : c));
+              } catch (e) {
+                setCards(prev => prev.map(c => c.id===tempId ? { ...c, title:'Error', loading:false, error:e.message } : c));
+              }
+            }));
+            if (specs.length === 1) setCachedSpec(promptText, specs[0]);
+            return;
+          }
+        } catch (e) {
+          console.warn('[Agntdash] one-shot dashboard failed, falling back to planner:', e.message);
+        }
+      }
+
+      // FALLBACK PATH: planner (+ per-card pipeline). Also the path for a matched
+      // template or cached spec, which resolve to a single instant card.
+      const { cards: planCards, plan } = (matched || cached)
+        ? { cards: [{ prompt: promptText, group: null, title: (matched?.spec || cached)?.title, size: null }], plan: null }
+        : await runDashboardPlanner(promptText);
 
       // Create a placeholder per planned card so they fill in live and in parallel.
       const planned = planCards.map(p => ({

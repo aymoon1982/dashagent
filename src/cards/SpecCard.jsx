@@ -13,6 +13,36 @@ import { applyAdapter } from './adapters.js';
  * components are pre-tested; only data varies).
  */
 
+/* Render one child of a composite card (itself a catalog type, sharing data). */
+function CompositeChild({ child, data, accent }) {
+  const def = CARD_TYPES[child.type];
+  if (!def || child.type === 'composite') {
+    return <div style={{ fontSize: 11, color: 'var(--fg-dim)' }}>Unsupported: {child.type}</div>;
+  }
+  const raw = applyAdapter(child, data);
+  const { props } = validateProps(child.type, { ...raw, accent });
+  const Comp = def.component;
+  return (
+    <div style={{ minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column', ...(child.span ? { gridColumn: `span ${child.span}` } : {}) }}>
+      {child.title && <div style={{ fontSize: 10, color: 'var(--fg-dim)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 4 }}>{child.title}</div>}
+      <div style={{ flex: 1, minHeight: 60 }}><Comp {...props} accent={accent} /></div>
+    </div>
+  );
+}
+
+function CompositeBody({ spec, data, accent }) {
+  const children = Array.isArray(spec.props?.children) ? spec.props.children.slice(0, 6) : [];
+  if (!children.length) return <div style={{ color: 'var(--fg-dim)', fontSize: 12 }}>Empty composite</div>;
+  const style = spec.props?.layout === 'rows'
+    ? { display: 'flex', flexDirection: 'column', gap: 10, height: '100%' }
+    : { display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0,1fr))', gap: 10, height: '100%' };
+  return (
+    <div style={style}>
+      {children.map((c, i) => <CompositeChild key={i} child={c} data={data} accent={accent} />)}
+    </div>
+  );
+}
+
 class SpecErrorBoundary extends React.Component {
   constructor(p) { super(p); this.state = { error: null }; }
   static getDerivedStateFromError(error) { return { error }; }
@@ -63,18 +93,26 @@ export function SpecCard({ card, onRetry, onPersistState }) {
     );
   }
 
-  // Adapter turns resolved data into props; coerce/validate against the type schema.
-  const rawProps = applyAdapter(spec, data || {});
-  const accent = spec.accent || card.renderSpec?.color || rawProps.accent;
-  const { props } = validateProps(spec.type, { ...rawProps, accent });
-  const Comp = def.component;
+  const accentBase = spec.accent || card.renderSpec?.color;
   const signature = `${spec.type}|${card.lastFetched || ''}`;
+
+  let body;
+  if (spec.type === 'composite') {
+    body = <CompositeBody spec={spec} data={data || {}} accent={accentBase} />;
+  } else {
+    // Adapter turns resolved data into props; coerce/validate against the schema.
+    const rawProps = applyAdapter(spec, data || {});
+    const accent = accentBase || rawProps.accent;
+    const { props } = validateProps(spec.type, { ...rawProps, accent });
+    const Comp = def.component;
+    body = <Comp {...props} accent={accent} />;
+  }
 
   return (
     <SpecErrorBoundary signature={signature} onRetry={onRetry}>
       <CardStateContext.Provider value={stateCtx}>
         <div style={{ height: '100%', overflow: 'auto', display: 'flex', flexDirection: 'column' }}>
-          <Comp {...props} accent={accent} />
+          {body}
         </div>
       </CardStateContext.Provider>
     </SpecErrorBoundary>

@@ -125,6 +125,23 @@ export const CARD_TYPES = {
     props: z.object({ src: z.string(), caption: z.string().optional(), alt: z.string().optional() }),
     summary: 'A single image/hero. props: src, caption. Use chrome:"none" + bleed:true. Good for photos, flags, maps snapshots.',
   },
+  composite: {
+    // Rendered specially by SpecCard (it recurses into children); this stub keeps
+    // the registry shape uniform and is never actually invoked.
+    component: () => null,
+    props: z.object({
+      layout: z.enum(['grid', 'rows']).optional(),
+      children: z.array(z.object({
+        type: z.string(),
+        span: z.number().optional(),
+        title: z.string().optional(),
+        adapter: z.string().optional(),
+        source: z.string().optional(),
+        props: z.record(z.string(), z.any()).optional(),
+      })).default([]),
+    }),
+    summary: 'Combine 2-4 OTHER catalog types into one card (e.g. a KPI next to its chart). props: { layout:"grid"|"rows", children:[{type, title?, span?, adapter?, source?, props}] }. Each child is itself a catalog type sharing this card\'s data. Use when one number or one chart alone is not the most informative representation.',
+  },
 };
 
 /* Compact catalog text injected into the router system prompt. */

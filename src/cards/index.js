@@ -11,4 +11,5 @@ export { SpecCard } from './SpecCard.jsx';
 export { CARD_TYPES, CARD_CATALOG, CARD_TYPE_IDS, validateProps } from './registry.js';
 export { ADAPTERS, applyAdapter } from './adapters.js';
 export { TEMPLATES, TEMPLATE_CATEGORIES, instantiateTemplate } from './templates.js';
-export { SPEC_SYSTEM_PROMPT, buildSpecUserMessage, normalizeSpec, matchTemplate } from './router.js';
+export { SPEC_SYSTEM_PROMPT, DASHBOARD_SYSTEM_PROMPT, parseDashboardResponse, buildSpecUserMessage, normalizeSpec, matchTemplate } from './router.js';
+export { getCachedSpec, setCachedSpec, clearSpecCache } from './cache.js';
