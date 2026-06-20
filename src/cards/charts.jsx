@@ -30,6 +30,19 @@ function Empty({ msg = 'No data' }) {
 }
 const has = s => Array.isArray(s) && s.length > 0;
 
+// Compact axis labels so big magnitudes (GDP, revenue, market cap) stay readable
+// — exact values still show in the tooltip on hover.
+const compact = v => {
+  const n = Number(v); if (!Number.isFinite(n)) return '';
+  const a = Math.abs(n);
+  if (a >= 1e12) return (n / 1e12).toFixed(1) + 'T';
+  if (a >= 1e9) return (n / 1e9).toFixed(1) + 'B';
+  if (a >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+  if (a >= 1e4) return (n / 1e3).toFixed(0) + 'K';
+  if (a >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+  return String(Math.round(n * 100) / 100);
+};
+
 const tip = {
   contentStyle: { background: '#0b0b14', border: '1px solid rgba(255,255,255,.12)', borderRadius: 8, fontSize: 11, color: '#f3f4f6' },
   labelStyle: { color: '#9ca3af', fontSize: 10 },
@@ -46,7 +59,7 @@ export function LineChartCard({ series, accent = PALETTE[0], yLabel }) {
       <LineChart data={series} margin={{ top: 8, right: 12, bottom: 4, left: -8 }}>
         <CartesianGrid stroke={GRID} vertical={false} />
         <XAxis dataKey="label" tick={AXIS} tickLine={false} axisLine={false} minTickGap={24} />
-        <YAxis tick={AXIS} tickLine={false} axisLine={false} width={44} />
+        <YAxis tick={AXIS} tickLine={false} axisLine={false} width={44} tickFormatter={compact} />
         <Tooltip {...tip} formatter={v => [v, yLabel || 'Value']} />
         <Line type="monotone" dataKey="value" stroke={accent} strokeWidth={2} dot={false} activeDot={{ r: 4 }} />
       </LineChart>
@@ -64,7 +77,7 @@ export function AreaChartCard({ series, accent = PALETTE[0], yLabel }) {
         <defs><linearGradient id={id} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={accent} stopOpacity={0.4} /><stop offset="100%" stopColor={accent} stopOpacity={0} /></linearGradient></defs>
         <CartesianGrid stroke={GRID} vertical={false} />
         <XAxis dataKey="label" tick={AXIS} tickLine={false} axisLine={false} minTickGap={24} />
-        <YAxis tick={AXIS} tickLine={false} axisLine={false} width={44} />
+        <YAxis tick={AXIS} tickLine={false} axisLine={false} width={44} tickFormatter={compact} />
         <Tooltip {...tip} formatter={v => [v, yLabel || 'Value']} />
         <Area type="monotone" dataKey="value" stroke={accent} strokeWidth={2} fill={`url(#${id})`} />
       </AreaChart>
@@ -80,8 +93,8 @@ export function BarChartCard({ series, horizontal = false }) {
       <BarChart data={series} layout={horizontal ? 'vertical' : 'horizontal'} margin={{ top: 8, right: 12, bottom: 4, left: horizontal ? 8 : -8 }}>
         <CartesianGrid stroke={GRID} vertical={false} />
         {horizontal
-          ? (<><XAxis type="number" tick={AXIS} tickLine={false} axisLine={false} /><YAxis type="category" dataKey="label" tick={AXIS} tickLine={false} axisLine={false} width={80} /></>)
-          : (<><XAxis dataKey="label" tick={AXIS} tickLine={false} axisLine={false} minTickGap={8} /><YAxis tick={AXIS} tickLine={false} axisLine={false} width={44} /></>)}
+          ? (<><XAxis type="number" tick={AXIS} tickLine={false} axisLine={false} tickFormatter={compact} /><YAxis type="category" dataKey="label" tick={AXIS} tickLine={false} axisLine={false} width={80} /></>)
+          : (<><XAxis dataKey="label" tick={AXIS} tickLine={false} axisLine={false} minTickGap={8} /><YAxis tick={AXIS} tickLine={false} axisLine={false} width={44} tickFormatter={compact} /></>)}
         <Tooltip {...tip} cursor={{ fill: 'rgba(255,255,255,.05)' }} />
         <Bar dataKey="value" radius={[4, 4, 0, 0]}>{series.map((_, i) => <Cell key={i} fill={PALETTE[i % PALETTE.length]} />)}</Bar>
       </BarChart>
@@ -97,7 +110,7 @@ export function StackedBarChartCard({ rows, keys = [], stacked = true }) {
       <BarChart data={rows} margin={{ top: 8, right: 12, bottom: 4, left: -8 }}>
         <CartesianGrid stroke={GRID} vertical={false} />
         <XAxis dataKey="label" tick={AXIS} tickLine={false} axisLine={false} minTickGap={8} />
-        <YAxis tick={AXIS} tickLine={false} axisLine={false} width={44} />
+        <YAxis tick={AXIS} tickLine={false} axisLine={false} width={44} tickFormatter={compact} />
         <Tooltip {...tip} cursor={{ fill: 'rgba(255,255,255,.05)' }} />
         <Legend wrapperStyle={{ fontSize: 10 }} />
         {keys.map((k, i) => <Bar key={k.key} dataKey={k.key} name={k.label || k.key} stackId={stacked ? 's' : undefined} fill={PALETTE[i % PALETTE.length]} radius={stacked ? 0 : [3, 3, 0, 0]} />)}
